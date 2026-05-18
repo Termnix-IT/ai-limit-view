@@ -1,4 +1,5 @@
 import { Gauge, Minus, RefreshCw, Settings, X } from "lucide-react";
+import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitlebarProps {
@@ -8,11 +9,30 @@ interface TitlebarProps {
 }
 
 export function Titlebar({ showSettings, onReload, onToggleSettings }: TitlebarProps) {
+  const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    // Buttons (and anything inside .titlebar__actions) should not initiate window drag.
+    if (target.closest("button") || target.closest(".titlebar__actions")) return;
+    void getCurrentWindow().startDragging();
+  };
+
+  const handleDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button") || target.closest(".titlebar__actions")) return;
+    void getCurrentWindow().toggleMaximize();
+  };
+
   return (
-    <div className="titlebar" data-tauri-drag-region>
-      <div className="titlebar__brand" data-tauri-drag-region>
+    <div
+      className="titlebar"
+      data-tauri-drag-region
+      onMouseDown={handleDragStart}
+      onDoubleClick={handleDoubleClick}
+    >
+      <div className="titlebar__brand">
         <Gauge size={12} />
-        <span data-tauri-drag-region>AI LimitUsage Watcher</span>
+        <span>AI LimitUsage Watcher</span>
       </div>
 
       <div className="titlebar__actions">
