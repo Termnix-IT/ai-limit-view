@@ -160,29 +160,14 @@ h2 {
 .toolPanel {
   position: relative;
   display: grid;
-  gap: 10px;
+  gap: 12px;
   overflow: hidden;
-  padding: 13px 13px 12px 18px;
+  padding: 16px;
 }
 
 .entryPanel,
 .sectionSurface {
   padding: 14px;
-}
-
-.statusStripe {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 5px;
-  background: #2d7b57;
-}
-
-.toolPanel.medium .statusStripe {
-  background: #b7791f;
-}
-
-.toolPanel.high .statusStripe {
-  background: #c24136;
 }
 
 .toolPanelHeader,
@@ -194,26 +179,62 @@ h2 {
   gap: 10px;
 }
 
-.riskBlock {
-  display: grid;
-  gap: 3px;
-  padding: 4px 0 2px;
-}
-
-.riskBlock strong {
-  font-size: 30px;
-  line-height: 1;
-}
-
-.riskBlock span {
-  color: #5c6862;
+.toolPanelHeader span {
+  color: #68746e;
   font-size: 12px;
 }
 
-.quickStats {
+.usageGraph {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 11px;
+  padding: 12px 0 4px;
+}
+
+.usageGraphTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.usageGraphTop span {
+  color: #68746e;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.usageGraphTop strong {
+  font-size: 46px;
+  line-height: 0.95;
+}
+
+.usageBar {
+  position: relative;
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 33, 30, 0.08);
+}
+
+.usageBarFill {
+  height: 100%;
+  background: #2d7b57;
+}
+
+.usageBarUsed {
+  height: 100%;
+  background: rgba(23, 33, 30, 0.1);
+}
+
+.minimalStats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #4f5c56;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .metric {
@@ -310,6 +331,10 @@ h2 {
 
 .fullWidth {
   width: 100%;
+}
+
+.subtle {
+  min-height: 32px;
 }
 
 .iconButton {
@@ -442,8 +467,8 @@ th {
     display: none;
   }
 
-  .riskBlock strong {
-    font-size: 27px;
+  .usageGraphTop strong {
+    font-size: 40px;
   }
 
   .fact,

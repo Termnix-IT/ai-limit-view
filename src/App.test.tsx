@@ -86,8 +86,8 @@ describe("App", () => {
 
     expect(await screen.findByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getAllByText("0分").length).toBeGreaterThan(0);
-    expect(screen.getByText("まだ使用ログはありません。")).toBeInTheDocument();
+    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("今日 0分").length).toBeGreaterThan(0);
   });
 
   it("saves pasted status through the Tauri command", async () => {
@@ -113,25 +113,25 @@ describe("App", () => {
     });
   });
 
-  it("shows low, medium, and high attention levels", async () => {
+  it("shows estimated remaining usage room from the high minutes setting", async () => {
     mockBaseResponses({
       ...emptyDashboard,
       tools: [
-        { ...emptyDashboard.tools[0], attentionLevel: "low" },
-        { ...emptyDashboard.tools[1], attentionLevel: "medium" },
+        { ...emptyDashboard.tools[0], estimatedMinutesToday: 60 },
+        { ...emptyDashboard.tools[1], estimatedMinutesToday: 180 },
         {
           ...emptyDashboard.tools[1],
           tool: "codex",
-          label: "Codex High",
-          attentionLevel: "high",
+          label: "Codex Max",
+          estimatedMinutesToday: 260,
         },
       ],
     });
 
     render(<App />);
 
-    expect(await screen.findByText("余裕あり")).toBeInTheDocument();
-    expect(screen.getByText("注意")).toBeInTheDocument();
-    expect(screen.getByText("制限リスク")).toBeInTheDocument();
+    expect(await screen.findByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
   });
 });

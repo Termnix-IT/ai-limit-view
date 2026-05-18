@@ -41,18 +41,6 @@ const sourceLabels: Record<SourceKind, string> = {
   estimated: "Estimated",
 };
 
-const levelLabels: Record<AttentionLevel, string> = {
-  low: "余裕あり",
-  medium: "注意",
-  high: "制限リスク",
-};
-
-const levelSubcopy: Record<AttentionLevel, string> = {
-  low: "作業継続リスクは低めです",
-  medium: "使用ペースを確認してください",
-  high: "次の区切りを意識してください",
-};
-
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -140,7 +128,7 @@ export function App() {
         {error ? <div className="alert danger">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
 
-        {activeTab === "dashboard" && <DashboardView dashboard={dashboard} onOpenOfficial={(tool) => runAction(() => api.openOfficialUsageUrl(tool), "公式Usageページを開きました。")} />}
+        {activeTab === "dashboard" && <DashboardView dashboard={dashboard} settings={settings} onOpenOfficial={(tool) => runAction(() => api.openOfficialUsageUrl(tool), "公式Usageページを開きました。")} />}
         {activeTab === "logs" && <UsageLogView logs={logs} onCreate={(input) => runAction(() => api.createUsageSession(input), "使用ログを保存しました。")} onDelete={(id) => runAction(() => api.deleteUsageSession(id), "使用ログを削除しました。")} />}
         {activeTab === "status" && <StatusInputView onSaveStatus={(input) => runAction(() => api.saveStatusSnapshot(input), "ステータスを保存しました。")} onSaveManual={(input) => runAction(() => api.saveManualLimitEntry(input), "手動残量メモを保存しました。")} />}
         {activeTab === "settings" && settings ? <SettingsViewPanel settings={settings} onSave={(entries) => runAction(() => api.updateSettings(entries), "設定を保存しました。")} onOpenOfficial={(tool) => runAction(() => api.openOfficialUsageUrl(tool), "公式Usageページを開きました。")} /> : null}
@@ -158,57 +146,77 @@ function NavButton({ active, icon, label, onClick }: { active: boolean; icon: JS
   );
 }
 
-function DashboardView({ dashboard, onOpenOfficial }: { dashboard: Dashboard | null; onOpenOfficial: (tool: ToolKind) => void }) {
+function DashboardView({
+  dashboard,
+  settings,
+  onOpenOfficial,
+}: {
+  dashboard: Dashboard | null;
+  settings: SettingsView | null;
+  onOpenOfficial: (tool: ToolKind) => void;
+}) {
   if (!dashboard) return <EmptyState text="読み込み中です。" />;
+  const highMinutes = Number(settings?.values.high_minutes ?? 240);
 
   return (
     <div className="stack">
       <div className="toolGrid">
         {dashboard.tools.map((tool) => (
-          <ToolPanel key={`${tool.tool}-${tool.label}`} tool={tool} onOpenOfficial={onOpenOfficial} />
+          <ToolPanel key={`${tool.tool}-${tool.label}`} highMinutes={highMinutes} tool={tool} onOpenOfficial={onOpenOfficial} />
         ))}
       </div>
-      <section className="sectionSurface compactRecent">
-        <div className="sectionHeader">
-          <div>
-            <p className="eyebrow">Estimated</p>
-            <h2>Recent</h2>
-          </div>
-          <span>{dashboard.recentLogs.length}件</span>
-        </div>
-        <LogTable logs={dashboard.recentLogs} compact />
-      </section>
     </div>
   );
 }
 
-function ToolPanel({ tool, onOpenOfficial }: { tool: ToolDashboard; onOpenOfficial: (tool: ToolKind) => void }) {
+function ToolPanel({
+  tool,
+  highMinutes,
+  onOpenOfficial,
+}: {
+  tool: ToolDashboard;
+  highMinutes: number;
+  onOpenOfficial: (tool: ToolKind) => void;
+}) {
+  const remainingPercent = estimatedRemainingPercent(tool.estimatedMinutesToday, highMinutes);
+  const usedPercent = 100 - remainingPercent;
+
   return (
-    <article className={`toolPanel ${tool.attentionLevel}`}>
-      <div className="statusStripe" />
+    <article className="toolPanel">
       <div className="toolPanelHeader">
-        <h2>{tool.label}</h2>
+        <div>
+          <h2>{tool.label}</h2>
+          <span>{tool.isRunning ? "起動中" : "停止中"}</span>
+        </div>
         <span className={`sourcePill ${tool.isRunning ? "running" : ""}`}>{tool.isRunning ? "Running" : "Estimated"}</span>
       </div>
-      <div className="riskBlock">
-        <strong>{levelLabels[tool.attentionLevel]}</strong>
-        <span>{levelSubcopy[tool.attentionLevel]}</span>
+
+      <div className="usageGraph" aria-label={`${tool.label} 推定残り余力 ${remainingPercent}%`}>
+        <div className="usageGraphTop">
+          <span>推定残り余力</span>
+          <strong>{remainingPercent}%</strong>
+        </div>
+        <div className="usageBar" aria-hidden="true">
+          <div className="usageBarFill" style={{ width: `${remainingPercent}%` }} />
+          <div className="usageBarUsed" style={{ width: `${usedPercent}%` }} />
+        </div>
       </div>
-      <div className="quickStats">
-        <Metric label="Today" value={formatMinutes(tool.estimatedMinutesToday)} source="Estimated" />
-        <Metric label="Launches" value={`${tool.launchCountToday}`} source="Estimated" />
+
+      <div className="minimalStats">
+        <span>今日 {formatMinutes(tool.estimatedMinutesToday)}</span>
+        <span>最終 {formatDateTime(tool.lastUsedAt)}</span>
       </div>
-      <div className="compactFacts">
-        <Fact label="Last" value={formatDateTime(tool.lastUsedAt)} source="Estimated" />
-        <Fact label="Active" value={tool.isRunning ? `Since ${formatDateTime(tool.activeSessionStartedAt)}` : "停止中"} source="Estimated" />
-        <Fact label="Manual" value={tool.latestManualRemaining ?? (tool.statusSaved ? tool.latestStatusSummary ?? "保存済み" : "未記録")} source="Manual" />
-      </div>
-      <button className="ghostButton fullWidth" onClick={() => onOpenOfficial(tool.tool)} type="button">
+      <button className="ghostButton fullWidth subtle" onClick={() => onOpenOfficial(tool.tool)} type="button">
         <ExternalLink size={16} />
         Official Usage
       </button>
     </article>
   );
+}
+
+function estimatedRemainingPercent(usedMinutes: number, highMinutes: number): number {
+  const limit = Number.isFinite(highMinutes) && highMinutes > 0 ? highMinutes : 240;
+  return Math.max(0, Math.min(100, Math.round(100 - (usedMinutes / limit) * 100)));
 }
 
 function Metric({ label, value, source }: { label: string; value: string; source: string }) {
