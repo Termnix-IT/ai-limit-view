@@ -1,4 +1,6 @@
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+use chrono::{
+    DateTime, Datelike, Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc, Weekday,
+};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -263,6 +265,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("claude_code_session_message_limit", "45"),
         ("claude_code_weekly_window_minutes", "10080"),
         ("claude_code_weekly_message_limit", "200"),
+        ("claude_code_weekly_reset_weekday", "wednesday"),
+        ("claude_code_weekly_reset_hour", "18"),
     ] {
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
@@ -401,6 +405,8 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_session_message_limit"
                 | "claude_code_weekly_window_minutes"
                 | "claude_code_weekly_message_limit"
+                | "claude_code_weekly_reset_weekday"
+                | "claude_code_weekly_reset_hour"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -408,6 +414,20 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_process_names"
         ) {
             return Err(format!("unsupported setting key: {}", entry.key));
+        }
+        if entry.key == "claude_code_weekly_reset_weekday" {
+            if parse_weekday(&entry.value).is_none() {
+                return Err(format!("invalid weekday: {}", entry.value));
+            }
+        }
+        if entry.key == "claude_code_weekly_reset_hour" {
+            let hour = entry
+                .value
+                .parse::<i64>()
+                .map_err(|_| format!("setting must be an integer: {}", entry.key))?;
+            if !(0..=23).contains(&hour) {
+                return Err("reset hour must be between 0 and 23".to_string());
+            }
         }
         if matches!(
             entry.key.as_str(),
@@ -549,11 +569,25 @@ fn tool_dashboard(
         let prompts = claude_code_prompts.unwrap_or(&[]);
         let session_window =
             setting_i64(settings, "claude_code_session_window_minutes", 300).max(1);
-        let weekly_window =
-            setting_i64(settings, "claude_code_weekly_window_minutes", 10080).max(1);
         let session_limit = setting_i64(settings, "claude_code_session_message_limit", 45);
         let weekly_limit = setting_i64(settings, "claude_code_weekly_message_limit", 200);
-        let quota = compute_claude_code_quota(prompts, Utc::now(), session_window, weekly_window);
+        let weekday = settings
+            .get("claude_code_weekly_reset_weekday")
+            .and_then(|v| parse_weekday(v))
+            .unwrap_or(Weekday::Wed);
+        let reset_hour = setting_i64(settings, "claude_code_weekly_reset_hour", 18)
+            .clamp(0, 23) as u32;
+        let local_offset = *Local::now().offset();
+        let now = Utc::now();
+        let quota = compute_claude_code_quota(
+            prompts,
+            now,
+            session_window,
+            local_offset,
+            weekday,
+            reset_hour,
+        );
+        let weekly_window = quota.weekly_window_minutes;
         (
             Some(quota.session_used),
             Some(session_limit),
@@ -602,16 +636,18 @@ struct ClaudeCodeQuota {
     session_used: i64,
     session_reset_at: Option<String>,
     weekly_used: i64,
+    weekly_window_minutes: i64,
 }
 
 fn compute_claude_code_quota(
     prompts: &[DateTime<Utc>],
     now: DateTime<Utc>,
     session_window_minutes: i64,
-    weekly_window_minutes: i64,
+    local_offset: FixedOffset,
+    weekly_reset_weekday: Weekday,
+    weekly_reset_hour: u32,
 ) -> ClaudeCodeQuota {
     let session_window = Duration::minutes(session_window_minutes.max(1));
-    let weekly_window = Duration::minutes(weekly_window_minutes.max(1));
 
     let mut sorted: Vec<DateTime<Utc>> = prompts.to_vec();
     sorted.sort();
@@ -641,13 +677,63 @@ fn compute_claude_code_quota(
         None => (0, None),
     };
 
-    let weekly_start = now - weekly_window;
+    let weekly_start = most_recent_weekly_reset(
+        now,
+        local_offset,
+        weekly_reset_weekday,
+        weekly_reset_hour,
+    );
     let weekly_used = sorted.iter().filter(|ts| **ts >= weekly_start).count() as i64;
+    let weekly_window_minutes = now
+        .signed_duration_since(weekly_start)
+        .num_minutes()
+        .max(0);
 
     ClaudeCodeQuota {
         session_used,
         session_reset_at,
         weekly_used,
+        weekly_window_minutes,
+    }
+}
+
+fn most_recent_weekly_reset(
+    now: DateTime<Utc>,
+    local_offset: FixedOffset,
+    weekday: Weekday,
+    hour: u32,
+) -> DateTime<Utc> {
+    let now_local = now.with_timezone(&local_offset);
+    let today_diff = (now_local.weekday().num_days_from_monday() as i64
+        - weekday.num_days_from_monday() as i64
+        + 7)
+        % 7;
+    let candidate_date = (now_local - Duration::days(today_diff)).date_naive();
+    let candidate_naive = candidate_date
+        .and_hms_opt(hour, 0, 0)
+        .unwrap_or_else(|| candidate_date.and_hms_opt(0, 0, 0).expect("midnight valid"));
+    let candidate = local_offset
+        .from_local_datetime(&candidate_naive)
+        .single()
+        .unwrap_or_else(|| local_offset.from_utc_datetime(&candidate_naive));
+    let candidate = if candidate > now_local {
+        candidate - Duration::days(7)
+    } else {
+        candidate
+    };
+    candidate.with_timezone(&Utc)
+}
+
+fn parse_weekday(value: &str) -> Option<Weekday> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "monday" | "mon" | "1" => Some(Weekday::Mon),
+        "tuesday" | "tue" | "tues" | "2" => Some(Weekday::Tue),
+        "wednesday" | "wed" | "3" => Some(Weekday::Wed),
+        "thursday" | "thu" | "thur" | "thurs" | "4" => Some(Weekday::Thu),
+        "friday" | "fri" | "5" => Some(Weekday::Fri),
+        "saturday" | "sat" | "6" => Some(Weekday::Sat),
+        "sunday" | "sun" | "7" | "0" => Some(Weekday::Sun),
+        _ => None,
     }
 }
 
@@ -1337,36 +1423,60 @@ mod tests {
         assert!(!codex.is_running);
     }
 
+    fn jst() -> FixedOffset {
+        FixedOffset::east_opt(9 * 3600).unwrap()
+    }
+
     #[test]
     fn claude_code_quota_counts_active_session_and_weekly_messages() {
-        let now: DateTime<Utc> = "2026-05-18T15:00:00Z".parse().unwrap();
+        // 2026-05-19 00:00 UTC == 2026-05-19 09:00 JST (Tuesday).
+        // Most recent Wednesday 18:00 JST in the past = 2026-05-13 18:00 JST = 2026-05-13 09:00 UTC.
+        let now: DateTime<Utc> = "2026-05-19T00:00:00Z".parse().unwrap();
         let prompts = vec![
-            // Old session window, should not count for session_used
-            "2026-05-18T05:00:00Z".parse().unwrap(),
-            "2026-05-18T05:30:00Z".parse().unwrap(),
-            // Current session window starts here (gap > 5h from previous)
-            "2026-05-18T12:00:00Z".parse().unwrap(),
-            "2026-05-18T13:00:00Z".parse().unwrap(),
-            "2026-05-18T14:30:00Z".parse().unwrap(),
-            // 8 days ago: outside weekly window
-            "2026-05-10T10:00:00Z".parse().unwrap(),
+            // Before this week's reset → excluded from weekly
+            "2026-05-13T08:30:00Z".parse().unwrap(),
+            // After reset, but old session window
+            "2026-05-13T10:00:00Z".parse().unwrap(),
+            "2026-05-13T10:30:00Z".parse().unwrap(),
+            // Current session window starts here (gap > 5h)
+            "2026-05-18T21:00:00Z".parse().unwrap(),
+            "2026-05-18T22:00:00Z".parse().unwrap(),
+            "2026-05-18T23:30:00Z".parse().unwrap(),
         ];
 
-        let quota = compute_claude_code_quota(&prompts, now, 300, 10080);
+        let quota = compute_claude_code_quota(&prompts, now, 300, jst(), Weekday::Wed, 18);
         assert_eq!(quota.session_used, 3);
-        assert_eq!(quota.session_reset_at.as_deref(), Some("2026-05-18T17:00:00+00:00"));
+        assert_eq!(quota.session_reset_at.as_deref(), Some("2026-05-19T02:00:00+00:00"));
         assert_eq!(quota.weekly_used, 5);
     }
 
     #[test]
     fn claude_code_quota_handles_expired_session() {
-        let now: DateTime<Utc> = "2026-05-18T20:00:00Z".parse().unwrap();
+        let now: DateTime<Utc> = "2026-05-19T05:00:00Z".parse().unwrap();
         let prompts = vec!["2026-05-18T10:00:00Z".parse().unwrap()];
 
-        let quota = compute_claude_code_quota(&prompts, now, 300, 10080);
+        let quota = compute_claude_code_quota(&prompts, now, 300, jst(), Weekday::Wed, 18);
         assert_eq!(quota.session_used, 0);
         assert!(quota.session_reset_at.is_none());
         assert_eq!(quota.weekly_used, 1);
+    }
+
+    #[test]
+    fn weekly_reset_rewinds_when_today_is_reset_day_before_hour() {
+        // 2026-05-20 (Wed) 14:00 JST = 2026-05-20 05:00 UTC, before the 18:00 cut-off.
+        // The most recent reset should be the previous Wednesday 18:00 JST.
+        let now: DateTime<Utc> = "2026-05-20T05:00:00Z".parse().unwrap();
+        let start = most_recent_weekly_reset(now, jst(), Weekday::Wed, 18);
+        // 2026-05-13 18:00 JST = 2026-05-13 09:00 UTC
+        assert_eq!(start.to_rfc3339(), "2026-05-13T09:00:00+00:00");
+    }
+
+    #[test]
+    fn weekly_reset_picks_today_when_past_reset_hour() {
+        // 2026-05-20 (Wed) 20:00 JST = 2026-05-20 11:00 UTC, after the 18:00 cut-off.
+        let now: DateTime<Utc> = "2026-05-20T11:00:00Z".parse().unwrap();
+        let start = most_recent_weekly_reset(now, jst(), Weekday::Wed, 18);
+        assert_eq!(start.to_rfc3339(), "2026-05-20T09:00:00+00:00");
     }
 
     #[test]

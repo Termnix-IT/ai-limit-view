@@ -205,7 +205,7 @@ function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
 
       <div className="minimalStats">
         <span>
-          週間メッセージ {weeklyUsed} / {weeklyLimit}
+          CLI 週間メッセージ {weeklyUsed} / {weeklyLimit}
         </span>
         <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
       </div>
@@ -213,7 +213,7 @@ function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
       <div className="hourLimit">
         <div className="hourLimitLabel">
           <span>
-            5時間枠 {sessionUsed} / {sessionLimit}
+            CLI 5時間枠 {sessionUsed} / {sessionLimit}
           </span>
           <strong>{sessionRemainingPercent}%</strong>
         </div>
@@ -311,21 +311,37 @@ function SettingsPanel({
         />
       </label>
       <label>
-        Claude Code 週次集計枠 分
-        <input
-          min={1}
-          type="number"
-          value={values.claude_code_weekly_window_minutes ?? "10080"}
-          onChange={(event) => updateValue("claude_code_weekly_window_minutes", event.target.value)}
-        />
-      </label>
-      <label>
         Claude Code 週次メッセージ上限
         <input
           min={1}
           type="number"
           value={values.claude_code_weekly_message_limit ?? "200"}
           onChange={(event) => updateValue("claude_code_weekly_message_limit", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 週次リセット曜日
+        <select
+          value={values.claude_code_weekly_reset_weekday ?? "wednesday"}
+          onChange={(event) => updateValue("claude_code_weekly_reset_weekday", event.target.value)}
+        >
+          <option value="sunday">日</option>
+          <option value="monday">月</option>
+          <option value="tuesday">火</option>
+          <option value="wednesday">水</option>
+          <option value="thursday">木</option>
+          <option value="friday">金</option>
+          <option value="saturday">土</option>
+        </select>
+      </label>
+      <label>
+        Claude Code 週次リセット時刻 (0-23)
+        <input
+          min={0}
+          max={23}
+          type="number"
+          value={values.claude_code_weekly_reset_hour ?? "18"}
+          onChange={(event) => updateValue("claude_code_weekly_reset_hour", event.target.value)}
         />
       </label>
       <label>

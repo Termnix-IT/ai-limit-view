@@ -65,6 +65,8 @@ const settings: SettingsView = {
     claude_code_session_message_limit: "45",
     claude_code_weekly_window_minutes: "10080",
     claude_code_weekly_message_limit: "200",
+    claude_code_weekly_reset_weekday: "wednesday",
+    claude_code_weekly_reset_hour: "18",
     medium_launches: "5",
     high_launches: "10",
     process_monitor_enabled: "1",
@@ -129,8 +131,8 @@ describe("App", () => {
     expect(await screen.findByText("75%")).toBeInTheDocument();
     expect(screen.getByText("91%")).toBeInTheDocument();
     expect(screen.getByText("80%")).toBeInTheDocument();
-    expect(screen.getByText("週間メッセージ 18 / 200")).toBeInTheDocument();
-    expect(screen.getByText("5時間枠 9 / 45")).toBeInTheDocument();
+    expect(screen.getByText("CLI 週間メッセージ 18 / 200")).toBeInTheDocument();
+    expect(screen.getByText("CLI 5時間枠 9 / 45")).toBeInTheDocument();
   });
 
   it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
@@ -143,7 +145,8 @@ describe("App", () => {
     expect(screen.getByLabelText("Codex 時間上限 分")).toHaveValue(60);
     expect(screen.getByLabelText("Claude Code 5時間枠メッセージ上限")).toHaveValue(45);
     expect(screen.getByLabelText("Claude Code 週次メッセージ上限")).toHaveValue(200);
-    expect(screen.getByLabelText("Claude Code 週次集計枠 分")).toHaveValue(10080);
+    expect(screen.getByLabelText("Claude Code 週次リセット曜日")).toHaveValue("wednesday");
+    expect(screen.getByLabelText("Claude Code 週次リセット時刻 (0-23)")).toHaveValue(18);
     expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
 
     await user.clear(screen.getByLabelText("Claude Code 週次メッセージ上限"));
