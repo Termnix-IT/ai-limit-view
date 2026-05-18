@@ -205,7 +205,7 @@ function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
 
       <div className="minimalStats">
         <span>
-          CLI 週間メッセージ {weeklyUsed} / {weeklyLimit}
+          CLI 週間トークン {formatTokens(weeklyUsed)} / {formatTokens(weeklyLimit)}
         </span>
         <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
       </div>
@@ -213,7 +213,7 @@ function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
       <div className="hourLimit">
         <div className="hourLimitLabel">
           <span>
-            CLI 5時間枠 {sessionUsed} / {sessionLimit}
+            CLI 5時間枠トークン {formatTokens(sessionUsed)} / {formatTokens(sessionLimit)}
           </span>
           <strong>{sessionRemainingPercent}%</strong>
         </div>
@@ -302,21 +302,21 @@ function SettingsPanel({
         />
       </label>
       <label>
-        Claude Code 5時間枠メッセージ上限
+        Claude Code 5時間枠トークン上限
         <input
           min={1}
           type="number"
-          value={values.claude_code_session_message_limit ?? "45"}
-          onChange={(event) => updateValue("claude_code_session_message_limit", event.target.value)}
+          value={values.claude_code_session_token_limit ?? "70000000"}
+          onChange={(event) => updateValue("claude_code_session_token_limit", event.target.value)}
         />
       </label>
       <label>
-        Claude Code 週次メッセージ上限
+        Claude Code 週次トークン上限
         <input
           min={1}
           type="number"
-          value={values.claude_code_weekly_message_limit ?? "200"}
-          onChange={(event) => updateValue("claude_code_weekly_message_limit", event.target.value)}
+          value={values.claude_code_weekly_token_limit ?? "750000000"}
+          onChange={(event) => updateValue("claude_code_weekly_token_limit", event.target.value)}
         />
       </label>
       <label>
@@ -389,6 +389,13 @@ function estimatedRemainingPercent(usedMinutes: number, highMinutes: number): nu
 function quotaRemainingPercent(used: number, limit: number): number {
   if (!Number.isFinite(limit) || limit <= 0) return 100;
   return Math.max(0, Math.min(100, Math.round(100 - (used / limit) * 100)));
+}
+
+function formatTokens(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "0";
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(2)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${Math.round(tokens)}`;
 }
 
 function toolHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {

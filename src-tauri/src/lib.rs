@@ -267,6 +267,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("claude_code_weekly_message_limit", "200"),
         ("claude_code_weekly_reset_weekday", "wednesday"),
         ("claude_code_weekly_reset_hour", "18"),
+        ("claude_code_session_token_limit", "70000000"),
+        ("claude_code_weekly_token_limit", "750000000"),
     ] {
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
@@ -403,8 +405,10 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_hour_high_minutes"
                 | "claude_code_session_window_minutes"
                 | "claude_code_session_message_limit"
+                | "claude_code_session_token_limit"
                 | "claude_code_weekly_window_minutes"
                 | "claude_code_weekly_message_limit"
+                | "claude_code_weekly_token_limit"
                 | "claude_code_weekly_reset_weekday"
                 | "claude_code_weekly_reset_hour"
                 | "medium_launches"
@@ -443,8 +447,10 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_hour_high_minutes"
                 | "claude_code_session_window_minutes"
                 | "claude_code_session_message_limit"
+                | "claude_code_session_token_limit"
                 | "claude_code_weekly_window_minutes"
                 | "claude_code_weekly_message_limit"
+                | "claude_code_weekly_token_limit"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -481,7 +487,7 @@ fn open_official_usage_url(tool: ToolKind) -> Result<(), String> {
 
 fn dashboard_for_date(conn: &Connection, date: &str) -> rusqlite::Result<Dashboard> {
     let settings = read_settings(conn)?;
-    let claude_code_prompts = collect_claude_code_prompt_times();
+    let claude_code_activity = collect_claude_code_activity();
     let tools = vec![
         tool_dashboard(conn, ToolKind::Codex, "Codex", date, &settings, None)?,
         tool_dashboard(
@@ -490,7 +496,7 @@ fn dashboard_for_date(conn: &Connection, date: &str) -> rusqlite::Result<Dashboa
             "Claude Code",
             date,
             &settings,
-            Some(&claude_code_prompts),
+            Some(&claude_code_activity),
         )?,
     ];
     let recent_logs = list_usage_logs_impl(conn, None)?;
@@ -507,7 +513,7 @@ fn tool_dashboard(
     label: &str,
     date: &str,
     settings: &HashMap<String, String>,
-    claude_code_prompts: Option<&[DateTime<Utc>]>,
+    claude_code_activity: Option<&ClaudeCodeActivity>,
 ) -> rusqlite::Result<ToolDashboard> {
     let tool_key = tool.as_str();
     let (launch_count_today, estimated_minutes_for_today): (i64, i64) = conn.query_row(
@@ -566,11 +572,12 @@ fn tool_dashboard(
         quota_weekly_limit,
         quota_weekly_window_minutes,
     ) = if matches!(tool, ToolKind::ClaudeCode) {
-        let prompts = claude_code_prompts.unwrap_or(&[]);
+        let default_activity = ClaudeCodeActivity::default();
+        let activity = claude_code_activity.unwrap_or(&default_activity);
         let session_window =
             setting_i64(settings, "claude_code_session_window_minutes", 300).max(1);
-        let session_limit = setting_i64(settings, "claude_code_session_message_limit", 45);
-        let weekly_limit = setting_i64(settings, "claude_code_weekly_message_limit", 200);
+        let session_limit = setting_i64(settings, "claude_code_session_token_limit", 70_000_000);
+        let weekly_limit = setting_i64(settings, "claude_code_weekly_token_limit", 750_000_000);
         let weekday = settings
             .get("claude_code_weekly_reset_weekday")
             .and_then(|v| parse_weekday(v))
@@ -580,7 +587,7 @@ fn tool_dashboard(
         let local_offset = *Local::now().offset();
         let now = Utc::now();
         let quota = compute_claude_code_quota(
-            prompts,
+            activity,
             now,
             session_window,
             local_offset,
@@ -639,8 +646,20 @@ struct ClaudeCodeQuota {
     weekly_window_minutes: i64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TokenEvent {
+    timestamp: DateTime<Utc>,
+    tokens: i64,
+}
+
+#[derive(Debug, Default, Clone)]
+struct ClaudeCodeActivity {
+    prompts: Vec<DateTime<Utc>>,
+    token_events: Vec<TokenEvent>,
+}
+
 fn compute_claude_code_quota(
-    prompts: &[DateTime<Utc>],
+    activity: &ClaudeCodeActivity,
     now: DateTime<Utc>,
     session_window_minutes: i64,
     local_offset: FixedOffset,
@@ -649,12 +668,12 @@ fn compute_claude_code_quota(
 ) -> ClaudeCodeQuota {
     let session_window = Duration::minutes(session_window_minutes.max(1));
 
-    let mut sorted: Vec<DateTime<Utc>> = prompts.to_vec();
-    sorted.sort();
+    let mut sorted_prompts = activity.prompts.clone();
+    sorted_prompts.sort();
 
-    // Walk forward, opening a new 5h window when the next prompt falls outside the active one.
+    // Walk forward, opening a new session window when the next prompt falls outside the active one.
     let mut current_window_start: Option<DateTime<Utc>> = None;
-    for ts in &sorted {
+    for ts in &sorted_prompts {
         match current_window_start {
             Some(start) if *ts < start + session_window => {}
             _ => current_window_start = Some(*ts),
@@ -665,10 +684,12 @@ fn compute_claude_code_quota(
         Some(start) => {
             let end = start + session_window;
             if now < end {
-                let used = sorted
+                let used: i64 = activity
+                    .token_events
                     .iter()
-                    .filter(|ts| **ts >= start && **ts < end)
-                    .count() as i64;
+                    .filter(|ev| ev.timestamp >= start && ev.timestamp < end)
+                    .map(|ev| ev.tokens)
+                    .sum();
                 (used, Some(end.to_rfc3339()))
             } else {
                 (0, None)
@@ -683,7 +704,12 @@ fn compute_claude_code_quota(
         weekly_reset_weekday,
         weekly_reset_hour,
     );
-    let weekly_used = sorted.iter().filter(|ts| **ts >= weekly_start).count() as i64;
+    let weekly_used: i64 = activity
+        .token_events
+        .iter()
+        .filter(|ev| ev.timestamp >= weekly_start)
+        .map(|ev| ev.tokens)
+        .sum();
     let weekly_window_minutes = now
         .signed_duration_since(weekly_start)
         .num_minutes()
@@ -742,22 +768,21 @@ fn claude_code_projects_dir() -> Option<PathBuf> {
     Some(PathBuf::from(home).join(".claude").join("projects"))
 }
 
-fn collect_claude_code_prompt_times() -> Vec<DateTime<Utc>> {
+fn collect_claude_code_activity() -> ClaudeCodeActivity {
     let Some(root) = claude_code_projects_dir() else {
-        return Vec::new();
+        return ClaudeCodeActivity::default();
     };
-    let mut prompts = Vec::new();
-    collect_user_prompts_from_dir(&root, &mut prompts);
-    prompts
+    let mut activity = ClaudeCodeActivity::default();
+    collect_activity_from_dir(&root, &mut activity);
+    activity
 }
 
-fn collect_user_prompts_from_dir(dir: &Path, out: &mut Vec<DateTime<Utc>>) {
+fn collect_activity_from_dir(dir: &Path, out: &mut ClaudeCodeActivity) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        // Skip subagent transcripts: they are recorded under any "subagents" directory.
         if path
             .file_name()
             .and_then(|name| name.to_str())
@@ -771,23 +796,21 @@ fn collect_user_prompts_from_dir(dir: &Path, out: &mut Vec<DateTime<Utc>>) {
             Err(_) => continue,
         };
         if file_type.is_dir() {
-            collect_user_prompts_from_dir(&path, out);
+            collect_activity_from_dir(&path, out);
         } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-            extract_user_prompts_from_jsonl(&path, out);
+            extract_activity_from_jsonl(&path, out);
         }
     }
 }
 
-fn extract_user_prompts_from_jsonl(path: &Path, out: &mut Vec<DateTime<Utc>>) {
+fn extract_activity_from_jsonl(path: &Path, out: &mut ClaudeCodeActivity) {
     let Ok(file) = fs::File::open(path) else {
         return;
     };
     let reader = BufReader::new(file);
-    // promptId -> earliest timestamp seen for that prompt turn.
-    // Entries within a single user-input turn (tool results, follow-ups) share the same
-    // promptId, so dedupe by it to count true user submissions.
+    // promptId -> earliest timestamp for that prompt turn (used for session boundary).
     let mut by_prompt: HashMap<String, DateTime<Utc>> = HashMap::new();
-    let mut anonymous: Vec<DateTime<Utc>> = Vec::new();
+    let mut anonymous_prompts: Vec<DateTime<Utc>> = Vec::new();
     for line in reader.lines().map_while(Result::ok) {
         if line.is_empty() {
             continue;
@@ -795,41 +818,71 @@ fn extract_user_prompts_from_jsonl(path: &Path, out: &mut Vec<DateTime<Utc>>) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
-        if value.get("type").and_then(|v| v.as_str()) != Some("user") {
-            continue;
-        }
-        if value.get("userType").and_then(|v| v.as_str()) != Some("external") {
-            continue;
-        }
         if value.get("isSidechain").and_then(|v| v.as_bool()) == Some(true) {
             continue;
         }
-        // Skip tool_result follow-ups: their content is an array of tool_result items.
-        if is_tool_result_message(&value) {
-            continue;
-        }
-        let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(ts) = parse_datetime(timestamp) else {
-            continue;
-        };
-        match value.get("promptId").and_then(|v| v.as_str()) {
-            Some(prompt_id) => {
-                by_prompt
-                    .entry(prompt_id.to_string())
-                    .and_modify(|existing| {
-                        if ts < *existing {
-                            *existing = ts;
-                        }
-                    })
-                    .or_insert(ts);
+        match value.get("type").and_then(|v| v.as_str()) {
+            Some("user") => {
+                if value.get("userType").and_then(|v| v.as_str()) != Some("external") {
+                    continue;
+                }
+                if is_tool_result_message(&value) {
+                    continue;
+                }
+                let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(ts) = parse_datetime(timestamp) else {
+                    continue;
+                };
+                match value.get("promptId").and_then(|v| v.as_str()) {
+                    Some(prompt_id) => {
+                        by_prompt
+                            .entry(prompt_id.to_string())
+                            .and_modify(|existing| {
+                                if ts < *existing {
+                                    *existing = ts;
+                                }
+                            })
+                            .or_insert(ts);
+                    }
+                    None => anonymous_prompts.push(ts),
+                }
             }
-            None => anonymous.push(ts),
+            Some("assistant") => {
+                let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let Some(ts) = parse_datetime(timestamp) else {
+                    continue;
+                };
+                let Some(usage) = value.pointer("/message/usage") else {
+                    continue;
+                };
+                let tokens = sum_assistant_tokens(usage);
+                if tokens > 0 {
+                    out.token_events.push(TokenEvent { timestamp: ts, tokens });
+                }
+            }
+            _ => {}
         }
     }
-    out.extend(by_prompt.into_values());
-    out.extend(anonymous);
+    out.prompts.extend(by_prompt.into_values());
+    out.prompts.extend(anonymous_prompts);
+}
+
+fn sum_assistant_tokens(usage: &serde_json::Value) -> i64 {
+    fn field(usage: &serde_json::Value, key: &str) -> i64 {
+        usage
+            .get(key)
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            .max(0)
+    }
+    field(usage, "input_tokens")
+        + field(usage, "cache_creation_input_tokens")
+        + field(usage, "cache_read_input_tokens")
+        + field(usage, "output_tokens")
 }
 
 fn is_tool_result_message(value: &serde_json::Value) -> bool {
@@ -1427,38 +1480,54 @@ mod tests {
         FixedOffset::east_opt(9 * 3600).unwrap()
     }
 
-    #[test]
-    fn claude_code_quota_counts_active_session_and_weekly_messages() {
-        // 2026-05-19 00:00 UTC == 2026-05-19 09:00 JST (Tuesday).
-        // Most recent Wednesday 18:00 JST in the past = 2026-05-13 18:00 JST = 2026-05-13 09:00 UTC.
-        let now: DateTime<Utc> = "2026-05-19T00:00:00Z".parse().unwrap();
-        let prompts = vec![
-            // Before this week's reset → excluded from weekly
-            "2026-05-13T08:30:00Z".parse().unwrap(),
-            // After reset, but old session window
-            "2026-05-13T10:00:00Z".parse().unwrap(),
-            "2026-05-13T10:30:00Z".parse().unwrap(),
-            // Current session window starts here (gap > 5h)
-            "2026-05-18T21:00:00Z".parse().unwrap(),
-            "2026-05-18T22:00:00Z".parse().unwrap(),
-            "2026-05-18T23:30:00Z".parse().unwrap(),
-        ];
+    fn ev(ts: &str, tokens: i64) -> TokenEvent {
+        TokenEvent {
+            timestamp: ts.parse().unwrap(),
+            tokens,
+        }
+    }
 
-        let quota = compute_claude_code_quota(&prompts, now, 300, jst(), Weekday::Wed, 18);
-        assert_eq!(quota.session_used, 3);
+    #[test]
+    fn claude_code_quota_sums_session_and_weekly_tokens() {
+        let now: DateTime<Utc> = "2026-05-19T00:00:00Z".parse().unwrap();
+        let activity = ClaudeCodeActivity {
+            prompts: vec![
+                // Before weekly reset (2026-05-13 09:00 UTC)
+                "2026-05-13T08:30:00Z".parse().unwrap(),
+                // After reset, but old session window
+                "2026-05-13T10:00:00Z".parse().unwrap(),
+                // Current session starts here (gap > 5h)
+                "2026-05-18T21:00:00Z".parse().unwrap(),
+                "2026-05-18T22:00:00Z".parse().unwrap(),
+                "2026-05-18T23:30:00Z".parse().unwrap(),
+            ],
+            token_events: vec![
+                ev("2026-05-13T08:30:00Z", 1_000),  // before weekly reset → excluded
+                ev("2026-05-13T10:05:00Z", 5_000),  // weekly only
+                ev("2026-05-18T21:05:00Z", 7_000),  // session + weekly
+                ev("2026-05-18T22:05:00Z", 8_000),  // session + weekly
+                ev("2026-05-18T23:35:00Z", 9_000),  // session + weekly
+            ],
+        };
+
+        let quota = compute_claude_code_quota(&activity, now, 300, jst(), Weekday::Wed, 18);
+        assert_eq!(quota.session_used, 7_000 + 8_000 + 9_000);
         assert_eq!(quota.session_reset_at.as_deref(), Some("2026-05-19T02:00:00+00:00"));
-        assert_eq!(quota.weekly_used, 5);
+        assert_eq!(quota.weekly_used, 5_000 + 7_000 + 8_000 + 9_000);
     }
 
     #[test]
     fn claude_code_quota_handles_expired_session() {
         let now: DateTime<Utc> = "2026-05-19T05:00:00Z".parse().unwrap();
-        let prompts = vec!["2026-05-18T10:00:00Z".parse().unwrap()];
+        let activity = ClaudeCodeActivity {
+            prompts: vec!["2026-05-18T10:00:00Z".parse().unwrap()],
+            token_events: vec![ev("2026-05-18T10:05:00Z", 4_200)],
+        };
 
-        let quota = compute_claude_code_quota(&prompts, now, 300, jst(), Weekday::Wed, 18);
+        let quota = compute_claude_code_quota(&activity, now, 300, jst(), Weekday::Wed, 18);
         assert_eq!(quota.session_used, 0);
         assert!(quota.session_reset_at.is_none());
-        assert_eq!(quota.weekly_used, 1);
+        assert_eq!(quota.weekly_used, 4_200);
     }
 
     #[test]
