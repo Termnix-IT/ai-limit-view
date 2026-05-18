@@ -697,6 +697,11 @@ fn extract_user_prompts_from_jsonl(path: &Path, out: &mut Vec<DateTime<Utc>>) {
         return;
     };
     let reader = BufReader::new(file);
+    // promptId -> earliest timestamp seen for that prompt turn.
+    // Entries within a single user-input turn (tool results, follow-ups) share the same
+    // promptId, so dedupe by it to count true user submissions.
+    let mut by_prompt: HashMap<String, DateTime<Utc>> = HashMap::new();
+    let mut anonymous: Vec<DateTime<Utc>> = Vec::new();
     for line in reader.lines().map_while(Result::ok) {
         if line.is_empty() {
             continue;
@@ -713,13 +718,47 @@ fn extract_user_prompts_from_jsonl(path: &Path, out: &mut Vec<DateTime<Utc>>) {
         if value.get("isSidechain").and_then(|v| v.as_bool()) == Some(true) {
             continue;
         }
+        // Skip tool_result follow-ups: their content is an array of tool_result items.
+        if is_tool_result_message(&value) {
+            continue;
+        }
         let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
             continue;
         };
-        if let Some(ts) = parse_datetime(timestamp) {
-            out.push(ts);
+        let Some(ts) = parse_datetime(timestamp) else {
+            continue;
+        };
+        match value.get("promptId").and_then(|v| v.as_str()) {
+            Some(prompt_id) => {
+                by_prompt
+                    .entry(prompt_id.to_string())
+                    .and_modify(|existing| {
+                        if ts < *existing {
+                            *existing = ts;
+                        }
+                    })
+                    .or_insert(ts);
+            }
+            None => anonymous.push(ts),
         }
     }
+    out.extend(by_prompt.into_values());
+    out.extend(anonymous);
+}
+
+fn is_tool_result_message(value: &serde_json::Value) -> bool {
+    let Some(content) = value.pointer("/message/content") else {
+        return false;
+    };
+    let Some(array) = content.as_array() else {
+        return false;
+    };
+    if array.is_empty() {
+        return false;
+    }
+    array
+        .iter()
+        .all(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
 }
 
 fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rusqlite::Result<i64> {
