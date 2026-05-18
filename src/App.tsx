@@ -1,7 +1,9 @@
 import { Gauge, RefreshCw, Save, Settings } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
-import { formatDateTime, formatMinutes, todayString } from "./date";
+import { formatDateTime, todayString } from "./date";
+import { ManaRing } from "./ManaRing";
+import { ToolChipRail } from "./ToolChipRail";
 import type { Dashboard, SettingsView, ToolDashboard } from "./types";
 
 export function App() {
@@ -11,6 +13,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
+  const [now, setNow] = useState<Date>(() => new Date());
   const date = useMemo(() => todayString(), []);
 
   const refresh = useCallback(async () => {
@@ -46,6 +49,11 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [scanAndRefresh]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   async function saveSettings(entries: Array<{ key: string; value: string }>) {
     setError(null);
     setNotice(null);
@@ -64,14 +72,14 @@ export function App() {
         <header className="topbar">
           <div>
             <div className="brandMark">
-              <Gauge size={16} />
+              <Gauge size={12} />
               <span>AI LimitUsage Watcher</span>
             </div>
-            <h1>{showSettings ? "設定" : "使用状況"}</h1>
+            <h1>{showSettings ? "設定" : "MANA STATUS"}</h1>
             <p className="refreshLine">
-              自動更新中
+              auto-sync
               {lastUpdatedAt
-                ? ` / ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
+                ? ` · ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
                     timeZone: "Asia/Tokyo",
                     hour: "2-digit",
                     minute: "2-digit",
@@ -82,21 +90,21 @@ export function App() {
           <div className="topbarActions">
             <button
               aria-label="再読み込み"
-              className="iconButton raised"
+              className="iconButton"
               onClick={() => {
                 scanAndRefresh().catch((err) => setError(String(err)));
               }}
               type="button"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={14} />
             </button>
             <button
               aria-label="設定"
-              className={`iconButton raised ${showSettings ? "active" : ""}`}
+              className={`iconButton ${showSettings ? "active" : ""}`}
               onClick={() => setShowSettings((current) => !current)}
               type="button"
             >
-              <Settings size={16} />
+              <Settings size={14} />
             </button>
           </div>
         </header>
@@ -107,7 +115,7 @@ export function App() {
         {showSettings && settings ? (
           <SettingsPanel settings={settings} onSave={saveSettings} />
         ) : (
-          <DashboardView dashboard={dashboard} settings={settings} />
+          <DashboardView dashboard={dashboard} settings={settings} now={now} />
         )}
       </section>
     </main>
@@ -117,150 +125,126 @@ export function App() {
 function DashboardView({
   dashboard,
   settings,
+  now,
 }: {
   dashboard: Dashboard | null;
   settings: SettingsView | null;
+  now: Date;
 }) {
-  if (!dashboard) return <EmptyState text="読み込み中です。" />;
+  if (!dashboard) return <EmptyState text="読み込み中です…" />;
+
+  const codex = dashboard.tools.find((t) => t.tool === "codex");
+  const claude = dashboard.tools.find((t) => t.tool === "claude_code");
+
+  const codexPct = codex
+    ? estimatedRemainingPercent(
+        codex.estimatedMinutesWindow,
+        toolHourHighMinutes(codex, settings),
+      )
+    : 100;
+  const claudePct = claude
+    ? quotaRemainingPercent(claude.quotaSessionUsed ?? 0, claude.quotaSessionLimit ?? 0)
+    : 100;
 
   return (
-    <div className="toolGrid">
-      {dashboard.tools.map((tool) =>
-        tool.tool === "claude_code" ? (
-          <ClaudeCodeQuotaUsage key={`${tool.tool}-${tool.label}`} tool={tool} />
-        ) : (
-          <ToolUsage
-            key={`${tool.tool}-${tool.label}`}
-            highMinutes={toolHighMinutes(tool, settings)}
-            hourHighMinutes={toolHourHighMinutes(tool, settings)}
-            tool={tool}
-          />
-        ),
-      )}
-    </div>
+    <>
+      <div className="manaPanel">
+        <ManaRing codexRemainingPercent={codexPct} claudeRemainingPercent={claudePct} />
+      </div>
+      <div className="chipGrid">
+        {codex ? <CodexChipRail tool={codex} settings={settings} now={now} /> : null}
+        {claude ? <ClaudeChipRail tool={claude} now={now} /> : null}
+      </div>
+    </>
   );
 }
 
-function ToolUsage({
+function CodexChipRail({
   tool,
-  highMinutes,
-  hourHighMinutes,
+  settings,
+  now,
 }: {
   tool: ToolDashboard;
-  highMinutes: number;
-  hourHighMinutes: number;
+  settings: SettingsView | null;
+  now: Date;
 }) {
-  const remainingPercent = estimatedRemainingPercent(tool.estimatedMinutesToday, highMinutes);
-  const hourRemainingPercent = estimatedRemainingPercent(tool.estimatedMinutesWindow, hourHighMinutes);
-  const usedPercent = 100 - remainingPercent;
-  const hourUsedPercent = 100 - hourRemainingPercent;
+  const windowMinutes = tool.windowMinutes || 300;
+  const hourHigh = toolHourHighMinutes(tool, settings);
+  const used = tool.estimatedMinutesWindow;
+  const limit = hourHigh;
+  // Output: 「窓内で何分使ったか」を 1 時間あたりに正規化したものをペースとして表示。
+  const paceMinutesPerHour = windowMinutes > 0 ? (used / windowMinutes) * 60 : 0;
+  const remaining = Math.max(0, limit - used);
+  const rechargeMinutes = computeCodexRecharge(tool, windowMinutes);
+  const recharge = rechargeMinutes > 0 ? formatCountdown(rechargeMinutes * 60) : "—";
+  const sinceLast = relativeTime(tool.lastUsedAt, now);
+  const intensity: "calm" | "steady" | "hot" =
+    paceMinutesPerHour > 30 ? "hot" : paceMinutesPerHour > 10 ? "steady" : "calm";
 
   return (
-    <section className="toolUsage" aria-label={`${tool.label} 推定残り余力 ${remainingPercent}%`}>
-      <div className="toolUsageHeader">
-        <div>
-          <h2>{tool.label}</h2>
-          <span>{tool.isRunning ? "起動中" : "停止中"}</span>
-        </div>
-        <strong>{remainingPercent}%</strong>
-      </div>
-
-      <div className="usageBar" aria-hidden="true">
-        <div className="usageBarFill" style={{ width: `${remainingPercent}%` }} />
-        <div className="usageBarUsed" style={{ width: `${usedPercent}%` }} />
-      </div>
-
-      <div className="minimalStats">
-        <span>今日の使用 {formatMinutes(tool.estimatedMinutesToday)}</span>
-        <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
-      </div>
-      <div className="hourLimit">
-        <div className="hourLimitLabel">
-          <span>時間枠 {formatMinutes(tool.estimatedMinutesWindow)}</span>
-          <strong>{hourRemainingPercent}%</strong>
-        </div>
-        <div className="usageBar small" aria-hidden="true">
-          <div className="usageBarFill" style={{ width: `${hourRemainingPercent}%` }} />
-          <div className="usageBarUsed" style={{ width: `${hourUsedPercent}%` }} />
-        </div>
-      </div>
-    </section>
+    <ToolChipRail
+      variant="codex"
+      tool={tool}
+      tierLabel="Pro"
+      output={{
+        value: `${paceMinutesPerHour.toFixed(1)} 分/h`,
+        tooltip: `直近${windowMinutes}分の累計 ${used} 分 (上限 ${limit} 分)`,
+        intensity,
+      }}
+      recharge={{
+        value: recharge,
+        tooltip: `時間枠 ${windowMinutes} 分のうち残り ${remaining} 分`,
+        warn: remaining > 0 && remaining <= 5,
+      }}
+      status={{
+        value: sinceLast,
+        tooltip: tool.isRunning ? "Codex プロセスは稼働中" : "Codex プロセスは待機中",
+        running: tool.isRunning,
+      }}
+    />
   );
 }
 
-function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
-  const sessionUsed = tool.quotaSessionUsed ?? 0;
-  const sessionLimit = tool.quotaSessionLimit ?? 0;
-  const sessionRemainingPercent = quotaRemainingPercent(sessionUsed, sessionLimit);
-  const sessionUsedPercent = 100 - sessionRemainingPercent;
-  const burnRate = tool.quotaBurnRateTokensPerMin ?? 0;
-  const planLabel = formatPlanLabel(tool.quotaPlan);
+function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
+  const used = tool.quotaSessionUsed ?? 0;
+  const limit = tool.quotaSessionLimit ?? 0;
+  const burn = tool.quotaBurnRateTokensPerMin ?? 0;
+  const tierLabel = formatPlanLabel(tool.quotaPlan);
+  const remainingTokens = Math.max(0, limit - used);
+  const rechargeAt = tool.quotaSessionResetAt;
+  const rechargeSeconds = rechargeAt ? secondsUntil(rechargeAt, now) : 0;
+  const recharge = rechargeAt && rechargeSeconds > 0 ? formatCountdown(rechargeSeconds) : "—";
+  const sinceLast = relativeTime(tool.lastUsedAt, now);
+  const intensity: "calm" | "steady" | "hot" =
+    burn > 500_000 ? "hot" : burn > 100_000 ? "steady" : "calm";
+  const depletionWarn = !!tool.quotaProjectedDepletionAt && rechargeSeconds > 0;
 
   return (
-    <section
-      className="toolUsage"
-      aria-label={`${tool.label} 5時間枠残り ${sessionRemainingPercent}%`}
-    >
-      <div className="toolUsageHeader">
-        <div>
-          <h2>{tool.label}</h2>
-          <span>{planLabel} / {tool.isRunning ? "起動中" : "停止中"}</span>
-        </div>
-        <strong>{sessionRemainingPercent}%</strong>
-      </div>
-
-      <div className="usageBar" aria-hidden="true">
-        <div className="usageBarFill" style={{ width: `${sessionRemainingPercent}%` }} />
-        <div className="usageBarUsed" style={{ width: `${sessionUsedPercent}%` }} />
-      </div>
-
-      <div className="minimalStats">
-        <span>
-          CLI 5時間枠 {formatTokens(sessionUsed)} / {formatTokens(sessionLimit)}
-        </span>
-        <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
-      </div>
-
-      <div className="hourLimit">
-        <div className="hourLimitLabel">
-          <span>バーンレート {formatTokens(Math.round(burnRate))} tok/分</span>
-          <span>
-            {tool.quotaSessionResetAt
-              ? `リセット ${formatDateTime(tool.quotaSessionResetAt)}`
-              : "アクティブな5時間枠なし"}
-          </span>
-        </div>
-        <div className="minimalStats">
-          <span>
-            {tool.quotaProjectedDepletionAt
-              ? `枯渇予測 ${formatDateTime(tool.quotaProjectedDepletionAt)}`
-              : burnRate > 0
-                ? "リセットまでに余裕あり"
-                : "—"}
-          </span>
-        </div>
-      </div>
-    </section>
+    <ToolChipRail
+      variant="claude"
+      tool={tool}
+      tierLabel={tierLabel}
+      output={{
+        value: `${formatTokens(Math.round(burn))} tok/分`,
+        tooltip: `5h枠 ${formatTokens(used)} / ${formatTokens(limit)} (残 ${formatTokens(remainingTokens)})`,
+        intensity,
+      }}
+      recharge={{
+        value: recharge,
+        tooltip: tool.quotaProjectedDepletionAt
+          ? `マナ枯渇予測 ${formatDateTime(tool.quotaProjectedDepletionAt)}`
+          : rechargeAt
+            ? `次のリチャージ ${formatDateTime(rechargeAt)}`
+            : "アクティブな5時間枠なし",
+        warn: depletionWarn,
+      }}
+      status={{
+        value: sinceLast,
+        tooltip: tool.isRunning ? "Claude Code セッション稼働中" : "Claude Code 待機中",
+        running: tool.isRunning,
+      }}
+    />
   );
-}
-
-function formatPlanLabel(plan?: string | null): string {
-  switch ((plan ?? "").toLowerCase()) {
-    case "pro":
-      return "Pro";
-    case "max5":
-    case "max_5":
-    case "max-5":
-      return "Max 5x";
-    case "max20":
-    case "max_20":
-    case "max-20":
-      return "Max 20x";
-    case "custom":
-      return "Custom";
-    default:
-      return plan ?? "—";
-  }
 }
 
 function SettingsPanel({
@@ -286,109 +270,127 @@ function SettingsPanel({
 
   return (
     <form className="settingsPanel" onSubmit={submit}>
-      <label>
-        Codex 注意ライン 分
-        <input
-          min={0}
-          type="number"
-          value={values.codex_medium_minutes ?? values.medium_minutes ?? "120"}
-          onChange={(event) => updateValue("codex_medium_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Codex 上限ライン 分
-        <input
-          min={0}
-          type="number"
-          value={values.codex_high_minutes ?? values.high_minutes ?? "240"}
-          onChange={(event) => updateValue("codex_high_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Codex 時間枠 分
-        <input
-          min={1}
-          type="number"
-          value={values.codex_hour_window_minutes ?? "300"}
-          onChange={(event) => updateValue("codex_hour_window_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Codex 時間上限 分
-        <input
-          min={0}
-          type="number"
-          value={values.codex_hour_high_minutes ?? "60"}
-          onChange={(event) => updateValue("codex_hour_high_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code プラン
-        <select
-          value={values.claude_code_plan ?? "pro"}
-          onChange={(event) => updateValue("claude_code_plan", event.target.value)}
-        >
-          <option value="pro">Pro</option>
-          <option value="max5">Max 5x</option>
-          <option value="max20">Max 20x</option>
-          <option value="custom">Custom</option>
-        </select>
-      </label>
-      {(values.claude_code_plan ?? "pro") === "custom" ? (
+      <section className="settingSection codex">
+        <div className="settingSection__title">Codex 設定</div>
         <label>
-          Claude Code 5時間枠トークン上限 (Custom)
+          Codex 注意ライン 分
+          <input
+            min={0}
+            type="number"
+            value={values.codex_medium_minutes ?? values.medium_minutes ?? "120"}
+            onChange={(event) => updateValue("codex_medium_minutes", event.target.value)}
+          />
+        </label>
+        <label>
+          Codex 上限ライン 分
+          <input
+            min={0}
+            type="number"
+            value={values.codex_high_minutes ?? values.high_minutes ?? "240"}
+            onChange={(event) => updateValue("codex_high_minutes", event.target.value)}
+          />
+        </label>
+        <label>
+          Codex 時間枠 分
           <input
             min={1}
             type="number"
-            value={values.claude_code_session_token_limit ?? "70000000"}
-            onChange={(event) => updateValue("claude_code_session_token_limit", event.target.value)}
+            value={values.codex_hour_window_minutes ?? "300"}
+            onChange={(event) => updateValue("codex_hour_window_minutes", event.target.value)}
           />
         </label>
-      ) : null}
-      <label>
-        Claude Code 5時間枠 分
-        <input
-          min={1}
-          type="number"
-          value={values.claude_code_session_window_minutes ?? "300"}
-          onChange={(event) => updateValue("claude_code_session_window_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code バーンレート計測窓 分
-        <input
-          min={1}
-          type="number"
-          value={values.claude_code_burn_window_minutes ?? "30"}
-          onChange={(event) => updateValue("claude_code_burn_window_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        プロセス監視
-        <select
-          value={values.process_monitor_enabled ?? "1"}
-          onChange={(event) => updateValue("process_monitor_enabled", event.target.value)}
-        >
-          <option value="1">有効</option>
-          <option value="0">無効</option>
-        </select>
-      </label>
-      <label>
-        Codex 監視名
-        <input
-          value={values.codex_process_names ?? "codex.exe,codex"}
-          onChange={(event) => updateValue("codex_process_names", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code 監視名
-        <input
-          value={values.claude_code_process_names ?? "claude.exe,claude-code.exe,claude"}
-          onChange={(event) => updateValue("claude_code_process_names", event.target.value)}
-        />
-      </label>
+        <label>
+          Codex 時間上限 分
+          <input
+            min={0}
+            type="number"
+            value={values.codex_hour_high_minutes ?? "60"}
+            onChange={(event) => updateValue("codex_hour_high_minutes", event.target.value)}
+          />
+        </label>
+        <label>
+          Codex 監視名
+          <input
+            value={values.codex_process_names ?? "codex.exe,codex"}
+            onChange={(event) => updateValue("codex_process_names", event.target.value)}
+          />
+        </label>
+      </section>
+
+      <section className="settingSection claude">
+        <div className="settingSection__title">Claude Code 設定</div>
+        <label>
+          Claude Code プラン
+          <select
+            value={values.claude_code_plan ?? "pro"}
+            onChange={(event) => updateValue("claude_code_plan", event.target.value)}
+          >
+            <option value="pro">Pro</option>
+            <option value="max5">Max 5x</option>
+            <option value="max20">Max 20x</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        {(values.claude_code_plan ?? "pro") === "custom" ? (
+          <label>
+            Claude Code 5時間枠トークン上限 (Custom)
+            <input
+              min={1}
+              type="number"
+              value={values.claude_code_session_token_limit ?? "70000000"}
+              onChange={(event) =>
+                updateValue("claude_code_session_token_limit", event.target.value)
+              }
+            />
+          </label>
+        ) : null}
+        <label>
+          Claude Code 5時間枠 分
+          <input
+            min={1}
+            type="number"
+            value={values.claude_code_session_window_minutes ?? "300"}
+            onChange={(event) =>
+              updateValue("claude_code_session_window_minutes", event.target.value)
+            }
+          />
+        </label>
+        <label>
+          Claude Code バーンレート計測窓 分
+          <input
+            min={1}
+            type="number"
+            value={values.claude_code_burn_window_minutes ?? "30"}
+            onChange={(event) =>
+              updateValue("claude_code_burn_window_minutes", event.target.value)
+            }
+          />
+        </label>
+        <label>
+          Claude Code 監視名
+          <input
+            value={values.claude_code_process_names ?? "claude.exe,claude-code.exe,claude"}
+            onChange={(event) => updateValue("claude_code_process_names", event.target.value)}
+          />
+        </label>
+      </section>
+
+      <section className="settingSection shared">
+        <div className="settingSection__title">監視設定</div>
+        <label>
+          プロセス監視
+          <select
+            value={values.process_monitor_enabled ?? "1"}
+            onChange={(event) => updateValue("process_monitor_enabled", event.target.value)}
+          >
+            <option value="1">有効</option>
+            <option value="0">無効</option>
+          </select>
+        </label>
+      </section>
+
       <button className="primaryButton" type="submit">
-        <Save size={15} />
+        <Save size={14} />
         設定を保存
       </button>
       <p className="storagePath">保存先: {settings.databasePath}</p>
@@ -417,13 +419,68 @@ function formatTokens(tokens: number): string {
   return `${Math.round(tokens)}`;
 }
 
-function toolHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {
-  const fallback = Number(settings?.values.high_minutes ?? 240);
-  const specific = Number(settings?.values[`${tool.tool}_high_minutes`] ?? fallback);
-  return Number.isFinite(specific) && specific > 0 ? specific : fallback;
-}
-
 function toolHourHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {
   const specific = Number(settings?.values[`${tool.tool}_hour_high_minutes`] ?? 60);
   return Number.isFinite(specific) && specific > 0 ? specific : 60;
+}
+
+function formatPlanLabel(plan?: string | null): string {
+  switch ((plan ?? "").toLowerCase()) {
+    case "pro":
+      return "Pro";
+    case "max5":
+    case "max_5":
+    case "max-5":
+      return "Max 5x";
+    case "max20":
+    case "max_20":
+    case "max-20":
+      return "Max 20x";
+    case "custom":
+      return "Custom";
+    default:
+      return plan ?? "—";
+  }
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
+  return `${m}:${pad(sec)}`;
+}
+
+function pad(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+function secondsUntil(iso: string, now: Date): number {
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return 0;
+  return Math.max(0, Math.floor((target - now.getTime()) / 1000));
+}
+
+function relativeTime(iso: string | null | undefined, now: Date): string {
+  if (!iso) return "未記録";
+  const past = new Date(iso).getTime();
+  if (Number.isNaN(past)) return "未記録";
+  const diffSec = Math.max(0, Math.floor((now.getTime() - past) / 1000));
+  if (diffSec < 60) return `${diffSec}秒前`;
+  const min = Math.floor(diffSec / 60);
+  if (min < 60) return `${min}分前`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}時間前`;
+  const day = Math.floor(hr / 24);
+  return `${day}日前`;
+}
+
+function computeCodexRecharge(tool: ToolDashboard, windowMinutes: number): number {
+  if (!tool.activeSessionStartedAt) return 0;
+  const started = new Date(tool.activeSessionStartedAt).getTime();
+  if (Number.isNaN(started)) return 0;
+  const end = started + windowMinutes * 60_000;
+  const remainingMs = end - Date.now();
+  return remainingMs > 0 ? Math.floor(remainingMs / 60_000) : 0;
 }

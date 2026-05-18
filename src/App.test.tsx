@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 const emptyDashboard: Dashboard = {
-  date: "2026-05-04",
+  date: "2026-05-19",
   tools: [
     {
       tool: "codex",
@@ -41,7 +41,8 @@ const emptyDashboard: Dashboard = {
       statusSaved: false,
       latestManualRemaining: null,
       attentionLevel: "low",
-      officialUsageUrl: "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
+      officialUsageUrl:
+        "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
       isRunning: false,
       activeSessionStartedAt: null,
     },
@@ -80,7 +81,8 @@ const settings: SettingsView = {
   databasePath: "C:\\Users\\example\\ai-limitusage-watcher.db",
   officialUrls: {
     codex: "https://platform.openai.com/usage",
-    claude_code: "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
+    claude_code:
+      "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
   },
 };
 
@@ -100,23 +102,23 @@ describe("App", () => {
     mockBaseResponses();
   });
 
-  it("renders only the simplified usage dashboard", async () => {
+  it("renders the mana status dashboard with both tool rails", async () => {
     render(<App />);
 
-    expect(await screen.findByText("使用状況")).toBeInTheDocument();
+    expect(await screen.findByText("MANA STATUS")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Official Usage")).not.toBeInTheDocument();
-    expect(screen.queryByText("Log")).not.toBeInTheDocument();
-    expect(screen.queryByText("Input")).not.toBeInTheDocument();
+    // Two MANA % readouts in the centre (CX + CC), both 100% on empty data.
+    expect(screen.getAllByText("100%")).toHaveLength(2);
+    expect(screen.getAllByText("出力")).toHaveLength(2);
+    expect(screen.getAllByText("リチャージ")).toHaveLength(2);
   });
 
-  it("shows estimated remaining usage room from each tool setting", async () => {
+  it("reflects Claude Code quota numbers in the chip rail", async () => {
     mockBaseResponses({
       ...emptyDashboard,
       tools: [
-        { ...emptyDashboard.tools[0], estimatedMinutesToday: 60, estimatedMinutesWindow: 20 },
+        { ...emptyDashboard.tools[0], estimatedMinutesWindow: 6 },
         {
           ...emptyDashboard.tools[1],
           quotaSessionUsed: 14_000_000,
@@ -133,32 +135,33 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("75%")).toBeInTheDocument();
-    // Claude Code session: 14M/70M = 20% used → 80% remaining.
-    expect(screen.getByText("80%")).toBeInTheDocument();
-    expect(screen.getByText("CLI 5時間枠 14.00M / 70.00M")).toBeInTheDocument();
-    expect(screen.getByText("バーンレート 300.0k tok/分")).toBeInTheDocument();
-    expect(screen.getByText("枯渇予測 2026-05-19 10:00")).toBeInTheDocument();
+    // Claude Code MANA = 80% remaining (14M of 70M used).
+    expect(await screen.findByText("80%")).toBeInTheDocument();
+    // Burn rate chip on Claude side.
+    expect(screen.getByText("300.0k tok/分")).toBeInTheDocument();
+    // Codex pace chip: 6 min over 300min window → 1.2 分/h.
+    expect(screen.getByText("1.2 分/h")).toBeInTheDocument();
   });
 
-  it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
+  it("opens settings and switches the Claude plan to custom", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(await screen.findByRole("button", { name: "設定" }));
     expect(screen.getByText("設定")).toBeInTheDocument();
     expect(screen.getByLabelText("Codex 上限ライン 分")).toHaveValue(240);
-    expect(screen.getByLabelText("Codex 時間上限 分")).toHaveValue(60);
     expect(screen.getByLabelText("Claude Code プラン")).toHaveValue("pro");
-    expect(screen.getByLabelText("Claude Code 5時間枠 分")).toHaveValue(300);
-    expect(screen.getByLabelText("Claude Code バーンレート計測窓 分")).toHaveValue(30);
     expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
 
-    // Switching to Custom should reveal the manual limit input.
     await user.selectOptions(screen.getByLabelText("Claude Code プラン"), "custom");
-    expect(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)")).toHaveValue(70_000_000);
+    expect(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)")).toHaveValue(
+      70_000_000,
+    );
     await user.clear(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"));
-    await user.type(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"), "90000000");
+    await user.type(
+      screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"),
+      "90000000",
+    );
     await user.click(screen.getByRole("button", { name: "設定を保存" }));
 
     await waitFor(() => {
