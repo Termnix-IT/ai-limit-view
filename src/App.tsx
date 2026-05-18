@@ -116,6 +116,7 @@ function DashboardView({
         <ToolUsage
           key={`${tool.tool}-${tool.label}`}
           highMinutes={toolHighMinutes(tool, settings)}
+          hourHighMinutes={toolHourHighMinutes(tool, settings)}
           tool={tool}
         />
       ))}
@@ -123,9 +124,19 @@ function DashboardView({
   );
 }
 
-function ToolUsage({ tool, highMinutes }: { tool: ToolDashboard; highMinutes: number }) {
+function ToolUsage({
+  tool,
+  highMinutes,
+  hourHighMinutes,
+}: {
+  tool: ToolDashboard;
+  highMinutes: number;
+  hourHighMinutes: number;
+}) {
   const remainingPercent = estimatedRemainingPercent(tool.estimatedMinutesToday, highMinutes);
+  const hourRemainingPercent = estimatedRemainingPercent(tool.estimatedMinutesWindow, hourHighMinutes);
   const usedPercent = 100 - remainingPercent;
+  const hourUsedPercent = 100 - hourRemainingPercent;
 
   return (
     <section className="toolUsage" aria-label={`${tool.label} 推定残り余力 ${remainingPercent}%`}>
@@ -145,6 +156,16 @@ function ToolUsage({ tool, highMinutes }: { tool: ToolDashboard; highMinutes: nu
       <div className="minimalStats">
         <span>今日の使用 {formatMinutes(tool.estimatedMinutesToday)}</span>
         <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
+      </div>
+      <div className="hourLimit">
+        <div className="hourLimitLabel">
+          <span>時間枠 {formatMinutes(tool.estimatedMinutesWindow)}</span>
+          <strong>{hourRemainingPercent}%</strong>
+        </div>
+        <div className="usageBar small" aria-hidden="true">
+          <div className="usageBarFill" style={{ width: `${hourRemainingPercent}%` }} />
+          <div className="usageBarUsed" style={{ width: `${hourUsedPercent}%` }} />
+        </div>
       </div>
     </section>
   );
@@ -192,6 +213,24 @@ function SettingsPanel({
         />
       </label>
       <label>
+        Codex 時間枠 分
+        <input
+          min={1}
+          type="number"
+          value={values.codex_hour_window_minutes ?? "300"}
+          onChange={(event) => updateValue("codex_hour_window_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Codex 時間上限 分
+        <input
+          min={0}
+          type="number"
+          value={values.codex_hour_high_minutes ?? "60"}
+          onChange={(event) => updateValue("codex_hour_high_minutes", event.target.value)}
+        />
+      </label>
+      <label>
         Claude Code 注意ライン 分
         <input
           min={0}
@@ -207,6 +246,24 @@ function SettingsPanel({
           type="number"
           value={values.claude_code_high_minutes ?? values.high_minutes ?? "240"}
           onChange={(event) => updateValue("claude_code_high_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 時間枠 分
+        <input
+          min={1}
+          type="number"
+          value={values.claude_code_hour_window_minutes ?? "300"}
+          onChange={(event) => updateValue("claude_code_hour_window_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 時間上限 分
+        <input
+          min={0}
+          type="number"
+          value={values.claude_code_hour_high_minutes ?? "60"}
+          onChange={(event) => updateValue("claude_code_hour_high_minutes", event.target.value)}
         />
       </label>
       <label>
@@ -255,4 +312,9 @@ function toolHighMinutes(tool: ToolDashboard, settings: SettingsView | null): nu
   const fallback = Number(settings?.values.high_minutes ?? 240);
   const specific = Number(settings?.values[`${tool.tool}_high_minutes`] ?? fallback);
   return Number.isFinite(specific) && specific > 0 ? specific : fallback;
+}
+
+function toolHourHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {
+  const specific = Number(settings?.values[`${tool.tool}_hour_high_minutes`] ?? 60);
+  return Number.isFinite(specific) && specific > 0 ? specific : 60;
 }

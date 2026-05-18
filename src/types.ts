@@ -46,6 +46,8 @@ export interface ToolDashboard {
   label: string;
   launchCountToday: number;
   estimatedMinutesToday: number;
+  estimatedMinutesWindow: number;
+  windowMinutes: number;
   lastUsedAt?: string | null;
   latestStatusSummary?: string | null;
   statusSaved: boolean;

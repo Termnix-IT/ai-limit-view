@@ -144,6 +144,30 @@ h2 {
   font-weight: 800;
 }
 
+.hourLimit {
+  display: grid;
+  gap: 5px;
+}
+
+.hourLimitLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #68746e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.hourLimitLabel strong {
+  color: #17211e;
+  font-size: 12px;
+}
+
+.usageBar.small {
+  height: 7px;
+}
+
 .iconButton,
 .primaryButton {
   display: inline-flex;

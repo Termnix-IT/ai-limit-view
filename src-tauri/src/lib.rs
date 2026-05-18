@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -123,6 +123,8 @@ pub struct ToolDashboard {
     label: String,
     launch_count_today: i64,
     estimated_minutes_today: i64,
+    estimated_minutes_window: i64,
+    window_minutes: i64,
     last_used_at: Option<String>,
     latest_status_summary: Option<String>,
     status_saved: bool,
@@ -231,8 +233,12 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("high_minutes", "240"),
         ("codex_medium_minutes", "120"),
         ("codex_high_minutes", "240"),
+        ("codex_hour_window_minutes", "300"),
+        ("codex_hour_high_minutes", "60"),
         ("claude_code_medium_minutes", "120"),
         ("claude_code_high_minutes", "240"),
+        ("claude_code_hour_window_minutes", "300"),
+        ("claude_code_hour_high_minutes", "60"),
         ("medium_launches", "5"),
         ("high_launches", "10"),
         ("process_monitor_enabled", "1"),
@@ -364,8 +370,12 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "high_minutes"
                 | "codex_medium_minutes"
                 | "codex_high_minutes"
+                | "codex_hour_window_minutes"
+                | "codex_hour_high_minutes"
                 | "claude_code_medium_minutes"
                 | "claude_code_high_minutes"
+                | "claude_code_hour_window_minutes"
+                | "claude_code_hour_high_minutes"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -380,8 +390,12 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "high_minutes"
                 | "codex_medium_minutes"
                 | "codex_high_minutes"
+                | "codex_hour_window_minutes"
+                | "codex_hour_high_minutes"
                 | "claude_code_medium_minutes"
                 | "claude_code_high_minutes"
+                | "claude_code_hour_window_minutes"
+                | "claude_code_hour_high_minutes"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -452,6 +466,8 @@ fn tool_dashboard(
             |row| row.get(0),
         )
         .optional()?;
+    let window_minutes = setting_i64(settings, &format!("{tool_key}_hour_window_minutes"), 300);
+    let estimated_minutes_window = rolling_window_minutes(conn, tool_key, window_minutes)?;
     let latest_status_summary: Option<String> = conn
         .query_row(
             "SELECT COALESCE(summary_text, raw_text) FROM status_snapshots
@@ -483,6 +499,8 @@ fn tool_dashboard(
         label: label.to_string(),
         launch_count_today,
         estimated_minutes_today,
+        estimated_minutes_window,
+        window_minutes,
         last_used_at,
         latest_status_summary: latest_status_summary.clone(),
         status_saved: latest_status_summary.is_some(),
@@ -582,6 +600,40 @@ fn settings_view(conn: &Connection, database_path: PathBuf) -> rusqlite::Result<
         database_path: database_path.display().to_string(),
         official_urls,
     })
+}
+
+fn rolling_window_minutes(conn: &Connection, tool: &str, window_minutes: i64) -> rusqlite::Result<i64> {
+    let now = Utc::now();
+    let window_start = now - Duration::minutes(window_minutes.max(1));
+    let mut stmt = conn.prepare(
+        "SELECT started_at, ended_at, duration_minutes FROM usage_sessions
+         WHERE tool = ?1 ORDER BY started_at DESC LIMIT 500",
+    )?;
+    let rows = stmt.query_map(params![tool], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+
+    let mut total = 0;
+    for row in rows {
+        let (started_at, ended_at, duration_minutes) = row?;
+        let Some(started) = parse_datetime(&started_at) else {
+            continue;
+        };
+        let ended = ended_at
+            .as_deref()
+            .and_then(parse_datetime)
+            .unwrap_or_else(|| started + Duration::minutes(duration_minutes.max(0)));
+        let overlap_start = started.max(window_start);
+        let overlap_end = ended.min(now);
+        if overlap_end > overlap_start {
+            total += overlap_end.signed_duration_since(overlap_start).num_minutes().max(0);
+        }
+    }
+    Ok(total)
 }
 
 fn scan_process_usage_impl(conn: &Connection, process_names: &[String]) -> rusqlite::Result<()> {
@@ -755,12 +807,20 @@ fn setting_i64(settings: &HashMap<String, String>, key: &str, default: i64) -> i
 }
 
 fn elapsed_minutes(started_at: &str) -> i64 {
-    DateTime::parse_from_rfc3339(started_at)
-        .map(|started| {
-            let elapsed = Utc::now().signed_duration_since(started.with_timezone(&Utc));
-            elapsed.num_minutes().max(0)
-        })
+    parse_datetime(started_at)
+        .map(|started| Utc::now().signed_duration_since(started).num_minutes().max(0))
         .unwrap_or(0)
+}
+
+fn parse_datetime(value: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(value)
+        .map(|date| date.with_timezone(&Utc))
+        .ok()
+        .or_else(|| {
+            NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
+                .ok()
+                .map(|date| DateTime::<Utc>::from_naive_utc_and_offset(date, Utc))
+        })
 }
 
 fn validate_session_input(input: &UsageSessionInput) -> Result<(), String> {
@@ -805,7 +865,9 @@ mod tests {
         assert_eq!(settings.get("medium_minutes"), Some(&"120".to_string()));
         assert_eq!(settings.get("high_launches"), Some(&"10".to_string()));
         assert_eq!(settings.get("codex_high_minutes"), Some(&"240".to_string()));
+        assert_eq!(settings.get("codex_hour_high_minutes"), Some(&"60".to_string()));
         assert_eq!(settings.get("claude_code_high_minutes"), Some(&"240".to_string()));
+        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"60".to_string()));
         assert_eq!(settings.get("process_monitor_enabled"), Some(&"1".to_string()));
     }
 
@@ -925,6 +987,49 @@ mod tests {
 
         assert_eq!(codex.attention_level, "low");
         assert_eq!(claude.attention_level, "high");
+    }
+
+    #[test]
+    fn dashboard_aggregates_recent_window_by_tool() {
+        let conn = memory_conn();
+        let now = Utc::now();
+        create_usage_session_impl(
+            &conn,
+            UsageSessionInput {
+                tool: ToolKind::Codex,
+                started_at: (now - Duration::minutes(30)).to_rfc3339(),
+                ended_at: Some((now - Duration::minutes(10)).to_rfc3339()),
+                duration_minutes: 20,
+                source: SourceKind::Manual,
+                confidence: 1.0,
+                note: None,
+            },
+        )
+        .expect("insert recent codex");
+        create_usage_session_impl(
+            &conn,
+            UsageSessionInput {
+                tool: ToolKind::ClaudeCode,
+                started_at: (now - Duration::minutes(400)).to_rfc3339(),
+                ended_at: Some((now - Duration::minutes(380)).to_rfc3339()),
+                duration_minutes: 20,
+                source: SourceKind::Manual,
+                confidence: 1.0,
+                note: None,
+            },
+        )
+        .expect("insert old claude");
+
+        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
+        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let claude = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "claude_code")
+            .unwrap();
+
+        assert_eq!(codex.estimated_minutes_window, 20);
+        assert_eq!(claude.estimated_minutes_window, 0);
     }
 
     #[test]
