@@ -3,7 +3,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 use tauri::{Manager, State};
@@ -133,6 +134,20 @@ pub struct ToolDashboard {
     official_usage_url: String,
     is_running: bool,
     active_session_started_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_session_used: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_session_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_session_reset_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_session_window_minutes: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_weekly_used: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_weekly_limit: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_weekly_window_minutes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -236,20 +251,26 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("codex_hour_window_minutes", "300"),
         ("codex_hour_high_minutes", "60"),
         ("claude_code_medium_minutes", "120"),
-        ("claude_code_high_minutes", "240"),
-        ("claude_code_hour_window_minutes", "300"),
-        ("claude_code_hour_high_minutes", "60"),
+        ("claude_code_high_minutes", "360"),
+        ("claude_code_hour_window_minutes", "10080"),
+        ("claude_code_hour_high_minutes", "360"),
         ("medium_launches", "5"),
         ("high_launches", "10"),
         ("process_monitor_enabled", "1"),
         ("codex_process_names", "codex.exe,codex"),
         ("claude_code_process_names", "claude.exe,claude-code.exe,claude"),
+        ("claude_code_session_window_minutes", "300"),
+        ("claude_code_session_message_limit", "45"),
+        ("claude_code_weekly_window_minutes", "10080"),
+        ("claude_code_weekly_message_limit", "200"),
     ] {
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
             params![key, value, now],
         )?;
     }
+
+    migrate_claude_code_defaults(conn, &now)?;
 
     Ok(())
 }
@@ -376,6 +397,10 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_high_minutes"
                 | "claude_code_hour_window_minutes"
                 | "claude_code_hour_high_minutes"
+                | "claude_code_session_window_minutes"
+                | "claude_code_session_message_limit"
+                | "claude_code_weekly_window_minutes"
+                | "claude_code_weekly_message_limit"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -396,6 +421,10 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_high_minutes"
                 | "claude_code_hour_window_minutes"
                 | "claude_code_hour_high_minutes"
+                | "claude_code_session_window_minutes"
+                | "claude_code_session_message_limit"
+                | "claude_code_weekly_window_minutes"
+                | "claude_code_weekly_message_limit"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -432,9 +461,17 @@ fn open_official_usage_url(tool: ToolKind) -> Result<(), String> {
 
 fn dashboard_for_date(conn: &Connection, date: &str) -> rusqlite::Result<Dashboard> {
     let settings = read_settings(conn)?;
+    let claude_code_prompts = collect_claude_code_prompt_times();
     let tools = vec![
-        tool_dashboard(conn, ToolKind::Codex, "Codex", date, &settings)?,
-        tool_dashboard(conn, ToolKind::ClaudeCode, "Claude Code", date, &settings)?,
+        tool_dashboard(conn, ToolKind::Codex, "Codex", date, &settings, None)?,
+        tool_dashboard(
+            conn,
+            ToolKind::ClaudeCode,
+            "Claude Code",
+            date,
+            &settings,
+            Some(&claude_code_prompts),
+        )?,
     ];
     let recent_logs = list_usage_logs_impl(conn, None)?;
     Ok(Dashboard {
@@ -450,9 +487,10 @@ fn tool_dashboard(
     label: &str,
     date: &str,
     settings: &HashMap<String, String>,
+    claude_code_prompts: Option<&[DateTime<Utc>]>,
 ) -> rusqlite::Result<ToolDashboard> {
     let tool_key = tool.as_str();
-    let (launch_count_today, estimated_minutes_today): (i64, i64) = conn.query_row(
+    let (launch_count_today, estimated_minutes_for_today): (i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(duration_minutes), 0)
          FROM usage_sessions
          WHERE tool = ?1 AND substr(started_at, 1, 10) = ?2",
@@ -468,6 +506,11 @@ fn tool_dashboard(
         .optional()?;
     let window_minutes = setting_i64(settings, &format!("{tool_key}_hour_window_minutes"), 300);
     let estimated_minutes_window = rolling_window_minutes(conn, tool_key, window_minutes)?;
+    let estimated_minutes_today = if matches!(tool, ToolKind::ClaudeCode) {
+        estimated_minutes_window
+    } else {
+        estimated_minutes_for_today
+    };
     let latest_status_summary: Option<String> = conn
         .query_row(
             "SELECT COALESCE(summary_text, raw_text) FROM status_snapshots
@@ -494,6 +537,36 @@ fn tool_dashboard(
         )
         .optional()?;
 
+    let (
+        quota_session_used,
+        quota_session_limit,
+        quota_session_reset_at,
+        quota_session_window_minutes,
+        quota_weekly_used,
+        quota_weekly_limit,
+        quota_weekly_window_minutes,
+    ) = if matches!(tool, ToolKind::ClaudeCode) {
+        let prompts = claude_code_prompts.unwrap_or(&[]);
+        let session_window =
+            setting_i64(settings, "claude_code_session_window_minutes", 300).max(1);
+        let weekly_window =
+            setting_i64(settings, "claude_code_weekly_window_minutes", 10080).max(1);
+        let session_limit = setting_i64(settings, "claude_code_session_message_limit", 45);
+        let weekly_limit = setting_i64(settings, "claude_code_weekly_message_limit", 200);
+        let quota = compute_claude_code_quota(prompts, Utc::now(), session_window, weekly_window);
+        (
+            Some(quota.session_used),
+            Some(session_limit),
+            quota.session_reset_at,
+            Some(session_window),
+            Some(quota.weekly_used),
+            Some(weekly_limit),
+            Some(weekly_window),
+        )
+    } else {
+        (None, None, None, None, None, None, None)
+    };
+
     Ok(ToolDashboard {
         tool: tool_key.to_string(),
         label: label.to_string(),
@@ -514,7 +587,139 @@ fn tool_dashboard(
         official_usage_url: official_url(&tool).to_string(),
         is_running: active_session_started_at.is_some(),
         active_session_started_at,
+        quota_session_used,
+        quota_session_limit,
+        quota_session_reset_at,
+        quota_session_window_minutes,
+        quota_weekly_used,
+        quota_weekly_limit,
+        quota_weekly_window_minutes,
     })
+}
+
+#[derive(Debug, Clone)]
+struct ClaudeCodeQuota {
+    session_used: i64,
+    session_reset_at: Option<String>,
+    weekly_used: i64,
+}
+
+fn compute_claude_code_quota(
+    prompts: &[DateTime<Utc>],
+    now: DateTime<Utc>,
+    session_window_minutes: i64,
+    weekly_window_minutes: i64,
+) -> ClaudeCodeQuota {
+    let session_window = Duration::minutes(session_window_minutes.max(1));
+    let weekly_window = Duration::minutes(weekly_window_minutes.max(1));
+
+    let mut sorted: Vec<DateTime<Utc>> = prompts.to_vec();
+    sorted.sort();
+
+    // Walk forward, opening a new 5h window when the next prompt falls outside the active one.
+    let mut current_window_start: Option<DateTime<Utc>> = None;
+    for ts in &sorted {
+        match current_window_start {
+            Some(start) if *ts < start + session_window => {}
+            _ => current_window_start = Some(*ts),
+        }
+    }
+
+    let (session_used, session_reset_at) = match current_window_start {
+        Some(start) => {
+            let end = start + session_window;
+            if now < end {
+                let used = sorted
+                    .iter()
+                    .filter(|ts| **ts >= start && **ts < end)
+                    .count() as i64;
+                (used, Some(end.to_rfc3339()))
+            } else {
+                (0, None)
+            }
+        }
+        None => (0, None),
+    };
+
+    let weekly_start = now - weekly_window;
+    let weekly_used = sorted.iter().filter(|ts| **ts >= weekly_start).count() as i64;
+
+    ClaudeCodeQuota {
+        session_used,
+        session_reset_at,
+        weekly_used,
+    }
+}
+
+fn claude_code_projects_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
+    Some(PathBuf::from(home).join(".claude").join("projects"))
+}
+
+fn collect_claude_code_prompt_times() -> Vec<DateTime<Utc>> {
+    let Some(root) = claude_code_projects_dir() else {
+        return Vec::new();
+    };
+    let mut prompts = Vec::new();
+    collect_user_prompts_from_dir(&root, &mut prompts);
+    prompts
+}
+
+fn collect_user_prompts_from_dir(dir: &Path, out: &mut Vec<DateTime<Utc>>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Skip subagent transcripts: they are recorded under any "subagents" directory.
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("subagents"))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if file_type.is_dir() {
+            collect_user_prompts_from_dir(&path, out);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            extract_user_prompts_from_jsonl(&path, out);
+        }
+    }
+}
+
+fn extract_user_prompts_from_jsonl(path: &Path, out: &mut Vec<DateTime<Utc>>) {
+    let Ok(file) = fs::File::open(path) else {
+        return;
+    };
+    let reader = BufReader::new(file);
+    for line in reader.lines().map_while(Result::ok) {
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if value.get("type").and_then(|v| v.as_str()) != Some("user") {
+            continue;
+        }
+        if value.get("userType").and_then(|v| v.as_str()) != Some("external") {
+            continue;
+        }
+        if value.get("isSidechain").and_then(|v| v.as_bool()) == Some(true) {
+            continue;
+        }
+        let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if let Some(ts) = parse_datetime(timestamp) {
+            out.push(ts);
+        }
+    }
 }
 
 fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rusqlite::Result<i64> {
@@ -535,6 +740,20 @@ fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rus
         ],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+fn migrate_claude_code_defaults(conn: &Connection, now: &str) -> rusqlite::Result<()> {
+    for (key, old_value, new_value) in [
+        ("claude_code_high_minutes", "240", "360"),
+        ("claude_code_hour_window_minutes", "300", "10080"),
+        ("claude_code_hour_high_minutes", "60", "360"),
+    ] {
+        conn.execute(
+            "UPDATE settings SET value = ?1, updated_at = ?2 WHERE key = ?3 AND value = ?4",
+            params![new_value, now, key, old_value],
+        )?;
+    }
+    Ok(())
 }
 
 fn list_usage_logs_impl(conn: &Connection, filter: Option<UsageLogFilter>) -> rusqlite::Result<Vec<UsageSession>> {
@@ -866,20 +1085,48 @@ mod tests {
         assert_eq!(settings.get("high_launches"), Some(&"10".to_string()));
         assert_eq!(settings.get("codex_high_minutes"), Some(&"240".to_string()));
         assert_eq!(settings.get("codex_hour_high_minutes"), Some(&"60".to_string()));
-        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"240".to_string()));
-        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"60".to_string()));
+        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"360".to_string()));
+        assert_eq!(settings.get("claude_code_hour_window_minutes"), Some(&"10080".to_string()));
+        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"360".to_string()));
         assert_eq!(settings.get("process_monitor_enabled"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn migration_updates_old_claude_code_defaults() {
+        let conn = Connection::open_in_memory().expect("open in-memory database");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO settings (key, value, updated_at) VALUES
+                ('claude_code_high_minutes', '240', 'old'),
+                ('claude_code_hour_window_minutes', '300', 'old'),
+                ('claude_code_hour_high_minutes', '60', 'old');
+            "#,
+        )
+        .expect("seed old settings");
+
+        migrate(&conn).expect("migrate database");
+        let settings = read_settings(&conn).expect("read settings");
+
+        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"360".to_string()));
+        assert_eq!(settings.get("claude_code_hour_window_minutes"), Some(&"10080".to_string()));
+        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"360".to_string()));
     }
 
     #[test]
     fn dashboard_aggregates_today_by_tool() {
         let conn = memory_conn();
+        let now = Utc::now();
         create_usage_session_impl(
             &conn,
             UsageSessionInput {
                 tool: ToolKind::Codex,
-                started_at: "2026-05-04T09:00".to_string(),
-                ended_at: Some("2026-05-04T10:30".to_string()),
+                started_at: (now - Duration::minutes(90)).to_rfc3339(),
+                ended_at: Some(now.to_rfc3339()),
                 duration_minutes: 90,
                 source: SourceKind::Manual,
                 confidence: 1.0,
@@ -891,7 +1138,7 @@ mod tests {
             &conn,
             UsageSessionInput {
                 tool: ToolKind::ClaudeCode,
-                started_at: "2026-05-04T11:00".to_string(),
+                started_at: (now - Duration::minutes(35)).to_rfc3339(),
                 ended_at: None,
                 duration_minutes: 35,
                 source: SourceKind::Manual,
@@ -901,7 +1148,7 @@ mod tests {
         )
         .expect("insert claude");
 
-        let dashboard = dashboard_for_date(&conn, "2026-05-04").expect("dashboard");
+        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
         let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
         let claude = dashboard
             .tools
@@ -945,6 +1192,7 @@ mod tests {
     #[test]
     fn attention_level_uses_tool_specific_thresholds() {
         let conn = memory_conn();
+        let now = Utc::now();
         conn.execute(
             "UPDATE settings SET value = '60' WHERE key = 'claude_code_high_minutes'",
             [],
@@ -967,7 +1215,7 @@ mod tests {
             &conn,
             UsageSessionInput {
                 tool: ToolKind::ClaudeCode,
-                started_at: "2026-05-04T09:00".to_string(),
+                started_at: (now - Duration::minutes(70)).to_rfc3339(),
                 ended_at: None,
                 duration_minutes: 70,
                 source: SourceKind::Manual,
@@ -977,7 +1225,7 @@ mod tests {
         )
         .expect("insert claude");
 
-        let dashboard = dashboard_for_date(&conn, "2026-05-04").expect("dashboard");
+        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
         let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
         let claude = dashboard
             .tools
@@ -1010,8 +1258,8 @@ mod tests {
             &conn,
             UsageSessionInput {
                 tool: ToolKind::ClaudeCode,
-                started_at: (now - Duration::minutes(400)).to_rfc3339(),
-                ended_at: Some((now - Duration::minutes(380)).to_rfc3339()),
+                started_at: (now - Duration::minutes(11000)).to_rfc3339(),
+                ended_at: Some((now - Duration::minutes(10980)).to_rfc3339()),
                 duration_minutes: 20,
                 source: SourceKind::Manual,
                 confidence: 1.0,
@@ -1048,6 +1296,38 @@ mod tests {
             .expect("dashboard");
         let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
         assert!(!codex.is_running);
+    }
+
+    #[test]
+    fn claude_code_quota_counts_active_session_and_weekly_messages() {
+        let now: DateTime<Utc> = "2026-05-18T15:00:00Z".parse().unwrap();
+        let prompts = vec![
+            // Old session window, should not count for session_used
+            "2026-05-18T05:00:00Z".parse().unwrap(),
+            "2026-05-18T05:30:00Z".parse().unwrap(),
+            // Current session window starts here (gap > 5h from previous)
+            "2026-05-18T12:00:00Z".parse().unwrap(),
+            "2026-05-18T13:00:00Z".parse().unwrap(),
+            "2026-05-18T14:30:00Z".parse().unwrap(),
+            // 8 days ago: outside weekly window
+            "2026-05-10T10:00:00Z".parse().unwrap(),
+        ];
+
+        let quota = compute_claude_code_quota(&prompts, now, 300, 10080);
+        assert_eq!(quota.session_used, 3);
+        assert_eq!(quota.session_reset_at.as_deref(), Some("2026-05-18T17:00:00+00:00"));
+        assert_eq!(quota.weekly_used, 5);
+    }
+
+    #[test]
+    fn claude_code_quota_handles_expired_session() {
+        let now: DateTime<Utc> = "2026-05-18T20:00:00Z".parse().unwrap();
+        let prompts = vec!["2026-05-18T10:00:00Z".parse().unwrap()];
+
+        let quota = compute_claude_code_quota(&prompts, now, 300, 10080);
+        assert_eq!(quota.session_used, 0);
+        assert!(quota.session_reset_at.is_none());
+        assert_eq!(quota.weekly_used, 1);
     }
 
     #[test]

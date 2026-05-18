@@ -112,14 +112,18 @@ function DashboardView({
 
   return (
     <div className="toolGrid">
-      {dashboard.tools.map((tool) => (
-        <ToolUsage
-          key={`${tool.tool}-${tool.label}`}
-          highMinutes={toolHighMinutes(tool, settings)}
-          hourHighMinutes={toolHourHighMinutes(tool, settings)}
-          tool={tool}
-        />
-      ))}
+      {dashboard.tools.map((tool) =>
+        tool.tool === "claude_code" ? (
+          <ClaudeCodeQuotaUsage key={`${tool.tool}-${tool.label}`} tool={tool} />
+        ) : (
+          <ToolUsage
+            key={`${tool.tool}-${tool.label}`}
+            highMinutes={toolHighMinutes(tool, settings)}
+            hourHighMinutes={toolHourHighMinutes(tool, settings)}
+            tool={tool}
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -165,6 +169,64 @@ function ToolUsage({
         <div className="usageBar small" aria-hidden="true">
           <div className="usageBarFill" style={{ width: `${hourRemainingPercent}%` }} />
           <div className="usageBarUsed" style={{ width: `${hourUsedPercent}%` }} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
+  const weeklyUsed = tool.quotaWeeklyUsed ?? 0;
+  const weeklyLimit = tool.quotaWeeklyLimit ?? 0;
+  const sessionUsed = tool.quotaSessionUsed ?? 0;
+  const sessionLimit = tool.quotaSessionLimit ?? 0;
+  const weeklyRemainingPercent = quotaRemainingPercent(weeklyUsed, weeklyLimit);
+  const sessionRemainingPercent = quotaRemainingPercent(sessionUsed, sessionLimit);
+  const weeklyUsedPercent = 100 - weeklyRemainingPercent;
+  const sessionUsedPercent = 100 - sessionRemainingPercent;
+
+  return (
+    <section
+      className="toolUsage"
+      aria-label={`${tool.label} 週間残り ${weeklyRemainingPercent}%`}
+    >
+      <div className="toolUsageHeader">
+        <div>
+          <h2>{tool.label}</h2>
+          <span>{tool.isRunning ? "起動中" : "停止中"}</span>
+        </div>
+        <strong>{weeklyRemainingPercent}%</strong>
+      </div>
+
+      <div className="usageBar" aria-hidden="true">
+        <div className="usageBarFill" style={{ width: `${weeklyRemainingPercent}%` }} />
+        <div className="usageBarUsed" style={{ width: `${weeklyUsedPercent}%` }} />
+      </div>
+
+      <div className="minimalStats">
+        <span>
+          週間メッセージ {weeklyUsed} / {weeklyLimit}
+        </span>
+        <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
+      </div>
+
+      <div className="hourLimit">
+        <div className="hourLimitLabel">
+          <span>
+            5時間枠 {sessionUsed} / {sessionLimit}
+          </span>
+          <strong>{sessionRemainingPercent}%</strong>
+        </div>
+        <div className="usageBar small" aria-hidden="true">
+          <div className="usageBarFill" style={{ width: `${sessionRemainingPercent}%` }} />
+          <div className="usageBarUsed" style={{ width: `${sessionUsedPercent}%` }} />
+        </div>
+        <div className="minimalStats">
+          <span>
+            {tool.quotaSessionResetAt
+              ? `次リセット ${formatDateTime(tool.quotaSessionResetAt)}`
+              : "アクティブな5時間枠なし"}
+          </span>
         </div>
       </div>
     </section>
@@ -231,39 +293,39 @@ function SettingsPanel({
         />
       </label>
       <label>
-        Claude Code 注意ライン 分
-        <input
-          min={0}
-          type="number"
-          value={values.claude_code_medium_minutes ?? values.medium_minutes ?? "120"}
-          onChange={(event) => updateValue("claude_code_medium_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code 上限ライン 分
-        <input
-          min={0}
-          type="number"
-          value={values.claude_code_high_minutes ?? values.high_minutes ?? "240"}
-          onChange={(event) => updateValue("claude_code_high_minutes", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code 時間枠 分
+        Claude Code 5時間枠 分
         <input
           min={1}
           type="number"
-          value={values.claude_code_hour_window_minutes ?? "300"}
-          onChange={(event) => updateValue("claude_code_hour_window_minutes", event.target.value)}
+          value={values.claude_code_session_window_minutes ?? "300"}
+          onChange={(event) => updateValue("claude_code_session_window_minutes", event.target.value)}
         />
       </label>
       <label>
-        Claude Code 時間上限 分
+        Claude Code 5時間枠メッセージ上限
         <input
-          min={0}
+          min={1}
           type="number"
-          value={values.claude_code_hour_high_minutes ?? "60"}
-          onChange={(event) => updateValue("claude_code_hour_high_minutes", event.target.value)}
+          value={values.claude_code_session_message_limit ?? "45"}
+          onChange={(event) => updateValue("claude_code_session_message_limit", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 週次集計枠 分
+        <input
+          min={1}
+          type="number"
+          value={values.claude_code_weekly_window_minutes ?? "10080"}
+          onChange={(event) => updateValue("claude_code_weekly_window_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 週次メッセージ上限
+        <input
+          min={1}
+          type="number"
+          value={values.claude_code_weekly_message_limit ?? "200"}
+          onChange={(event) => updateValue("claude_code_weekly_message_limit", event.target.value)}
         />
       </label>
       <label>
@@ -306,6 +368,11 @@ function EmptyState({ text }: { text: string }) {
 function estimatedRemainingPercent(usedMinutes: number, highMinutes: number): number {
   const limit = Number.isFinite(highMinutes) && highMinutes > 0 ? highMinutes : 240;
   return Math.max(0, Math.min(100, Math.round(100 - (usedMinutes / limit) * 100)));
+}
+
+function quotaRemainingPercent(used: number, limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) return 100;
+  return Math.max(0, Math.min(100, Math.round(100 - (used / limit) * 100)));
 }
 
 function toolHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {

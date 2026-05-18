@@ -58,9 +58,13 @@ const settings: SettingsView = {
     codex_hour_window_minutes: "300",
     codex_hour_high_minutes: "60",
     claude_code_medium_minutes: "120",
-    claude_code_high_minutes: "120",
-    claude_code_hour_window_minutes: "300",
-    claude_code_hour_high_minutes: "30",
+    claude_code_high_minutes: "360",
+    claude_code_hour_window_minutes: "10080",
+    claude_code_hour_high_minutes: "360",
+    claude_code_session_window_minutes: "300",
+    claude_code_session_message_limit: "45",
+    claude_code_weekly_window_minutes: "10080",
+    claude_code_weekly_message_limit: "200",
     medium_launches: "5",
     high_launches: "10",
     process_monitor_enabled: "1",
@@ -106,16 +110,27 @@ describe("App", () => {
     mockBaseResponses({
       ...emptyDashboard,
       tools: [
-        { ...emptyDashboard.tools[0], estimatedMinutesToday: 60 },
-        { ...emptyDashboard.tools[1], estimatedMinutesToday: 60, estimatedMinutesWindow: 15 },
+        { ...emptyDashboard.tools[0], estimatedMinutesToday: 60, estimatedMinutesWindow: 20 },
+        {
+          ...emptyDashboard.tools[1],
+          quotaSessionUsed: 9,
+          quotaSessionLimit: 45,
+          quotaSessionResetAt: "2026-05-18T20:00:00Z",
+          quotaSessionWindowMinutes: 300,
+          quotaWeeklyUsed: 18,
+          quotaWeeklyLimit: 200,
+          quotaWeeklyWindowMinutes: 10080,
+        },
       ],
     });
 
     render(<App />);
 
     expect(await screen.findByText("75%")).toBeInTheDocument();
-    expect(screen.getAllByText("50%").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("時間枠 15分")).toBeInTheDocument();
+    expect(screen.getByText("91%")).toBeInTheDocument();
+    expect(screen.getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("週間メッセージ 18 / 200")).toBeInTheDocument();
+    expect(screen.getByText("5時間枠 9 / 45")).toBeInTheDocument();
   });
 
   it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
@@ -126,14 +141,15 @@ describe("App", () => {
     expect(screen.getByText("設定")).toBeInTheDocument();
     expect(screen.getByLabelText("Codex 上限ライン 分")).toHaveValue(240);
     expect(screen.getByLabelText("Codex 時間上限 分")).toHaveValue(60);
-    expect(screen.getByLabelText("Claude Code 上限ライン 分")).toHaveValue(120);
-    expect(screen.getByLabelText("Claude Code 時間上限 分")).toHaveValue(30);
+    expect(screen.getByLabelText("Claude Code 5時間枠メッセージ上限")).toHaveValue(45);
+    expect(screen.getByLabelText("Claude Code 週次メッセージ上限")).toHaveValue(200);
+    expect(screen.getByLabelText("Claude Code 週次集計枠 分")).toHaveValue(10080);
     expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
 
-    await user.clear(screen.getByLabelText("Claude Code 上限ライン 分"));
-    await user.type(screen.getByLabelText("Claude Code 上限ライン 分"), "300");
-    await user.clear(screen.getByLabelText("Claude Code 時間上限 分"));
-    await user.type(screen.getByLabelText("Claude Code 時間上限 分"), "45");
+    await user.clear(screen.getByLabelText("Claude Code 週次メッセージ上限"));
+    await user.type(screen.getByLabelText("Claude Code 週次メッセージ上限"), "300");
+    await user.clear(screen.getByLabelText("Claude Code 5時間枠メッセージ上限"));
+    await user.type(screen.getByLabelText("Claude Code 5時間枠メッセージ上限"), "50");
     await user.click(screen.getByRole("button", { name: "設定を保存" }));
 
     await waitFor(() => {
@@ -141,8 +157,8 @@ describe("App", () => {
         "update_settings",
         expect.objectContaining({
           entries: expect.arrayContaining([
-            { key: "claude_code_high_minutes", value: "300" },
-            { key: "claude_code_hour_high_minutes", value: "45" },
+            { key: "claude_code_weekly_message_limit", value: "300" },
+            { key: "claude_code_session_message_limit", value: "50" },
           ]),
         }),
       );

@@ -56,6 +56,13 @@ export interface ToolDashboard {
   officialUsageUrl: string;
   isRunning: boolean;
   activeSessionStartedAt?: string | null;
+  quotaSessionUsed?: number | null;
+  quotaSessionLimit?: number | null;
+  quotaSessionResetAt?: string | null;
+  quotaSessionWindowMinutes?: number | null;
+  quotaWeeklyUsed?: number | null;
+  quotaWeeklyLimit?: number | null;
+  quotaWeeklyWindowMinutes?: number | null;
 }
 
 export interface Dashboard {
