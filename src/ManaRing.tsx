@@ -8,13 +8,13 @@ interface ManaRingProps {
   onCyclePlan: () => void;
 }
 
-const SIZE = 220;
+const SIZE = 200;
 const CENTER = SIZE / 2;
 
-const OUTER_R = 96;
-const OUTER_W = 18;
-const INNER_R = 66;
-const INNER_W = 16;
+const OUTER_R = 86;
+const OUTER_W = 16;
+const INNER_R = 58;
+const INNER_W = 14;
 
 const OUTER_C = 2 * Math.PI * OUTER_R;
 const INNER_C = 2 * Math.PI * INNER_R;

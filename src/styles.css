@@ -35,10 +35,15 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
   background:
     radial-gradient(900px 600px at 18% -10%, rgba(74, 144, 226, 0.14), transparent 60%),
     radial-gradient(900px 600px at 100% 110%, rgba(255, 140, 66, 0.12), transparent 60%),
@@ -77,23 +82,22 @@ h2 {
 /* ───── App shell ───── */
 
 .appShell {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .workspace {
+  flex: 1 1 auto;
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  align-content: start;
   max-width: 420px;
+  width: 100%;
   margin: 0 auto;
-  padding: 6px 12px 14px;
-}
-
-.pageHead {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 2px 2px 0;
+  padding: 8px 12px 10px;
+  overflow: hidden;
 }
 
 /* ───── Titlebar ───── */
@@ -126,6 +130,15 @@ h2 {
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.titlebar__sync {
+  color: var(--ink-dim);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .titlebar__actions {
@@ -252,9 +265,9 @@ h2 {
   position: relative;
   display: grid;
   justify-items: center;
-  padding: 8px 10px 4px;
+  padding: 4px 8px 0;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--surface);
   backdrop-filter: blur(14px);
   overflow: hidden;
@@ -273,8 +286,8 @@ h2 {
 
 .manaRing {
   position: relative;
-  width: 220px;
-  height: 220px;
+  width: 200px;
+  height: 200px;
   z-index: 1;
 }
 
@@ -392,10 +405,10 @@ h2 {
 .chipRail {
   position: relative;
   display: grid;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 6px 9px 7px;
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 12px;
   background: var(--surface);
   backdrop-filter: blur(10px);
 }
@@ -461,7 +474,7 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 4px 6px;
+  padding: 2px 4px;
   border-radius: 8px;
   font-size: 11px;
   font-weight: 700;

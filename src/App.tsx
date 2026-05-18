@@ -67,28 +67,23 @@ export function App() {
     }
   }, [dashboard, refresh]);
 
+  const syncedAt = lastUpdatedAt
+    ? lastUpdatedAt.toLocaleTimeString("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
   return (
     <main className="appShell">
       <Titlebar
+        syncedAt={syncedAt}
         onReload={() => {
           scanAndRefresh().catch((err) => setError(String(err)));
         }}
       />
       <section className="workspace">
-        <header className="pageHead">
-          <h1>MANA STATUS</h1>
-          <p className="refreshLine">
-            auto-sync
-            {lastUpdatedAt
-              ? ` · ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
-                  timeZone: "Asia/Tokyo",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}`
-              : ""}
-          </p>
-        </header>
-
         {error ? <div className="alert danger">{error}</div> : null}
 
         <DashboardView

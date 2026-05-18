@@ -4,9 +4,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitlebarProps {
   onReload: () => void;
+  syncedAt?: string | null;
 }
 
-export function Titlebar({ onReload }: TitlebarProps) {
+export function Titlebar({ onReload, syncedAt }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -29,7 +30,8 @@ export function Titlebar({ onReload }: TitlebarProps) {
     >
       <div className="titlebar__brand">
         <Gauge size={12} />
-        <span>AI LimitUsage Watcher</span>
+        <span>MANA STATUS</span>
+        {syncedAt ? <span className="titlebar__sync">· {syncedAt}</span> : null}
       </div>
 
       <div className="titlebar__actions">
