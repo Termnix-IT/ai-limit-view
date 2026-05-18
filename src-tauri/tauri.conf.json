@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "AI LimitUsage Watcher",
-        "width": 480,
-        "height": 560,
-        "minWidth": 420,
-        "minHeight": 500
+        "width": 400,
+        "height": 360,
+        "minWidth": 360,
+        "minHeight": 320
       }
     ],
     "security": {

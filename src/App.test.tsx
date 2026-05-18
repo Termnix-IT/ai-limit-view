@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { Dashboard, SettingsView, UsageSession } from "./types";
+import type { Dashboard, SettingsView } from "./types";
 
 const invokeMock = vi.fn();
 
@@ -51,6 +51,9 @@ const settings: SettingsView = {
     high_minutes: "240",
     medium_launches: "5",
     high_launches: "10",
+    process_monitor_enabled: "1",
+    codex_process_names: "codex.exe,codex",
+    claude_code_process_names: "claude.exe,claude-code.exe,claude",
   },
   databasePath: "C:\\Users\\example\\ai-limitusage-watcher.db",
   officialUrls: {
@@ -59,18 +62,12 @@ const settings: SettingsView = {
   },
 };
 
-function mockBaseResponses(dashboard: Dashboard = emptyDashboard, logs: UsageSession[] = []) {
+function mockBaseResponses(dashboard: Dashboard = emptyDashboard) {
   invokeMock.mockImplementation((command: string) => {
     if (command === "get_dashboard") return Promise.resolve(dashboard);
-    if (command === "list_usage_logs") return Promise.resolve(logs);
     if (command === "get_settings") return Promise.resolve(settings);
     if (command === "scan_process_usage") return Promise.resolve();
-    if (command === "save_status_snapshot") return Promise.resolve(1);
-    if (command === "create_usage_session") return Promise.resolve(1);
-    if (command === "delete_usage_session") return Promise.resolve();
-    if (command === "save_manual_limit_entry") return Promise.resolve(1);
     if (command === "update_settings") return Promise.resolve();
-    if (command === "open_official_usage_url") return Promise.resolve();
     return Promise.reject(new Error(`Unexpected command: ${command}`));
   });
 }
@@ -81,36 +78,16 @@ describe("App", () => {
     mockBaseResponses();
   });
 
-  it("renders an empty dashboard state", async () => {
+  it("renders only the simplified usage dashboard", async () => {
     render(<App />);
 
-    expect(await screen.findByText("Codex")).toBeInTheDocument();
+    expect(await screen.findByText("使用状況")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("今日 0分").length).toBeGreaterThan(0);
-  });
-
-  it("saves pasted status through the Tauri command", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(await screen.findByRole("button", { name: "Input" }));
-    await user.type(screen.getByPlaceholderText("例: /status結果: 保存済み"), "/status結果: 保存済み");
-    await user.type(screen.getByLabelText("Raw text"), "Codex status sample");
-    await user.click(screen.getByRole("button", { name: "Save Status" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith(
-        "save_status_snapshot",
-        expect.objectContaining({
-          input: expect.objectContaining({
-            tool: "codex",
-            rawText: "Codex status sample",
-            summaryText: "/status結果: 保存済み",
-          }),
-        }),
-      );
-    });
+    expect(screen.queryByText("Official Usage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Log")).not.toBeInTheDocument();
+    expect(screen.queryByText("Input")).not.toBeInTheDocument();
   });
 
   it("shows estimated remaining usage room from the high minutes setting", async () => {
@@ -119,12 +96,6 @@ describe("App", () => {
       tools: [
         { ...emptyDashboard.tools[0], estimatedMinutesToday: 60 },
         { ...emptyDashboard.tools[1], estimatedMinutesToday: 180 },
-        {
-          ...emptyDashboard.tools[1],
-          tool: "codex",
-          label: "Codex Max",
-          estimatedMinutesToday: 260,
-        },
       ],
     });
 
@@ -132,6 +103,30 @@ describe("App", () => {
 
     expect(await screen.findByText("75%")).toBeInTheDocument();
     expect(screen.getByText("25%")).toBeInTheDocument();
-    expect(screen.getByText("0%")).toBeInTheDocument();
+  });
+
+  it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "設定" }));
+    expect(screen.getByText("設定")).toBeInTheDocument();
+    expect(screen.getByLabelText("上限ライン 分")).toHaveValue(240);
+    expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
+
+    await user.clear(screen.getByLabelText("上限ライン 分"));
+    await user.type(screen.getByLabelText("上限ライン 分"), "300");
+    await user.click(screen.getByRole("button", { name: "設定を保存" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "update_settings",
+        expect.objectContaining({
+          entries: expect.arrayContaining([
+            { key: "high_minutes", value: "300" },
+          ]),
+        }),
+      );
+    });
   });
 });
