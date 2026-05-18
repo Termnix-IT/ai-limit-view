@@ -37,6 +37,9 @@ export const api = {
   updateSettings(entries: Array<{ key: string; value: string }>) {
     return invoke<void>("update_settings", { entries });
   },
+  scanProcessUsage() {
+    return invoke<void>("scan_process_usage");
+  },
   openOfficialUsageUrl(tool: ToolKind) {
     return invoke<void>("open_official_usage_url", { tool });
   },

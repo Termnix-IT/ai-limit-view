@@ -75,9 +75,14 @@ export function App() {
     setLastUpdatedAt(new Date());
   }, [date]);
 
-  useEffect(() => {
-    refresh().catch((err) => setError(String(err)));
+  const scanAndRefresh = useCallback(async () => {
+    await api.scanProcessUsage();
+    await refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    scanAndRefresh().catch((err) => setError(String(err)));
+  }, [scanAndRefresh]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -85,6 +90,13 @@ export function App() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [refresh]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      scanAndRefresh().catch((err) => setError(String(err)));
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [scanAndRefresh]);
 
   async function runAction(action: () => Promise<unknown>, message: string) {
     setError(null);
@@ -109,11 +121,11 @@ export function App() {
             </div>
             <h1>{tabTitle(activeTab)}</h1>
             <p className="refreshLine">
-              Auto refresh 5s
+              Auto refresh 5s / Process scan 30s
               {lastUpdatedAt ? ` / ${lastUpdatedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
             </p>
           </div>
-          <button aria-label="Refresh" className="iconButton raised" onClick={() => void refresh()} type="button">
+          <button aria-label="Refresh" className="iconButton raised" onClick={() => void scanAndRefresh()} type="button">
             <Clock size={16} />
           </button>
         </header>
@@ -176,7 +188,7 @@ function ToolPanel({ tool, onOpenOfficial }: { tool: ToolDashboard; onOpenOffici
       <div className="statusStripe" />
       <div className="toolPanelHeader">
         <h2>{tool.label}</h2>
-        <span className="sourcePill">Estimated</span>
+        <span className={`sourcePill ${tool.isRunning ? "running" : ""}`}>{tool.isRunning ? "Running" : "Estimated"}</span>
       </div>
       <div className="riskBlock">
         <strong>{levelLabels[tool.attentionLevel]}</strong>
@@ -188,6 +200,7 @@ function ToolPanel({ tool, onOpenOfficial }: { tool: ToolDashboard; onOpenOffici
       </div>
       <div className="compactFacts">
         <Fact label="Last" value={formatDateTime(tool.lastUsedAt)} source="Estimated" />
+        <Fact label="Active" value={tool.isRunning ? `Since ${formatDateTime(tool.activeSessionStartedAt)}` : "停止中"} source="Estimated" />
         <Fact label="Manual" value={tool.latestManualRemaining ?? (tool.statusSaved ? tool.latestStatusSummary ?? "保存済み" : "未記録")} source="Manual" />
       </div>
       <button className="ghostButton fullWidth" onClick={() => onOpenOfficial(tool.tool)} type="button">
@@ -475,6 +488,21 @@ function SettingsViewPanel({
         <label>
           High launches
           <input value={values.high_launches ?? "10"} onChange={(event) => updateValue("high_launches", event.target.value)} type="number" min={0} />
+        </label>
+        <label>
+          Process monitor
+          <select value={values.process_monitor_enabled ?? "1"} onChange={(event) => updateValue("process_monitor_enabled", event.target.value)}>
+            <option value="1">Enabled</option>
+            <option value="0">Disabled</option>
+          </select>
+        </label>
+        <label>
+          Codex process names
+          <input value={values.codex_process_names ?? "codex.exe,codex"} onChange={(event) => updateValue("codex_process_names", event.target.value)} />
+        </label>
+        <label>
+          Claude Code process names
+          <input value={values.claude_code_process_names ?? "claude.exe,claude-code.exe,claude"} onChange={(event) => updateValue("claude_code_process_names", event.target.value)} />
         </label>
         <button className="primaryButton" type="submit">
           <Save size={16} />

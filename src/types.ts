@@ -52,6 +52,8 @@ export interface ToolDashboard {
   latestManualRemaining?: string | null;
   attentionLevel: AttentionLevel;
   officialUsageUrl: string;
+  isRunning: boolean;
+  activeSessionStartedAt?: string | null;
 }
 
 export interface Dashboard {

@@ -24,6 +24,8 @@ const emptyDashboard: Dashboard = {
       latestManualRemaining: null,
       attentionLevel: "low",
       officialUsageUrl: "https://platform.openai.com/usage",
+      isRunning: false,
+      activeSessionStartedAt: null,
     },
     {
       tool: "claude_code",
@@ -36,6 +38,8 @@ const emptyDashboard: Dashboard = {
       latestManualRemaining: null,
       attentionLevel: "low",
       officialUsageUrl: "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
+      isRunning: false,
+      activeSessionStartedAt: null,
     },
   ],
   recentLogs: [],
@@ -60,6 +64,7 @@ function mockBaseResponses(dashboard: Dashboard = emptyDashboard, logs: UsageSes
     if (command === "get_dashboard") return Promise.resolve(dashboard);
     if (command === "list_usage_logs") return Promise.resolve(logs);
     if (command === "get_settings") return Promise.resolve(settings);
+    if (command === "scan_process_usage") return Promise.resolve();
     if (command === "save_status_snapshot") return Promise.resolve(1);
     if (command === "create_usage_session") return Promise.resolve(1);
     if (command === "delete_usage_session") return Promise.resolve();

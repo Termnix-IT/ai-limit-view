@@ -275,6 +275,11 @@ h2 {
   font-weight: 800;
 }
 
+.sourcePill.running {
+  color: #fffefa;
+  background: #2d7b57;
+}
+
 .primaryButton,
 .ghostButton {
   padding: 0 12px;
