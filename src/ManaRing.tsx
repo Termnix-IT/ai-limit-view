@@ -4,6 +4,8 @@ import { Sparkles } from "lucide-react";
 interface ManaRingProps {
   codexRemainingPercent: number;
   claudeRemainingPercent: number;
+  planLabel: string;
+  onCyclePlan: () => void;
 }
 
 const SIZE = 220;
@@ -22,6 +24,8 @@ const WARN_THRESHOLD = 15;
 export function ManaRing({
   codexRemainingPercent,
   claudeRemainingPercent,
+  planLabel,
+  onCyclePlan,
 }: ManaRingProps) {
   const claudePct = clamp(claudeRemainingPercent);
   const codexPct = clamp(codexRemainingPercent);
@@ -143,7 +147,13 @@ export function ManaRing({
         </g>
       </svg>
 
-      <div className="manaRing__center">
+      <button
+        type="button"
+        className="manaRing__center manaRing__center--tap"
+        onClick={onCyclePlan}
+        aria-label={`プラン切替 (現在 ${planLabel})`}
+        title="クリックでプラン切替"
+      >
         <span className="manaRing__title">
           <Sparkles size={11} />
           MANA
@@ -156,7 +166,8 @@ export function ManaRing({
           <span>CX</span>
           <strong>{Math.round(codexPct)}%</strong>
         </span>
-      </div>
+        <span className="manaRing__plan">{planLabel}</span>
+      </button>
     </div>
   );
 }

@@ -1,5 +1,4 @@
-import { Save } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { formatDateTime, todayString } from "./date";
 import { ManaRing } from "./ManaRing";
@@ -7,12 +6,12 @@ import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
 import type { Dashboard, SettingsView, ToolDashboard } from "./types";
 
+const PLAN_CYCLE = ["pro", "max5", "max20"] as const;
+
 export function App() {
-  const [showSettings, setShowSettings] = useState(false);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const date = useMemo(() => todayString(), []);
@@ -55,30 +54,29 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
-  async function saveSettings(entries: Array<{ key: string; value: string }>) {
-    setError(null);
-    setNotice(null);
+  const cyclePlan = useCallback(async () => {
+    const claude = dashboard?.tools.find((t) => t.tool === "claude_code");
+    const current = (claude?.quotaPlan ?? "pro").toLowerCase();
+    const index = PLAN_CYCLE.indexOf(current as (typeof PLAN_CYCLE)[number]);
+    const next = PLAN_CYCLE[(index < 0 ? 0 : index + 1) % PLAN_CYCLE.length];
     try {
-      await api.updateSettings(entries);
+      await api.updateSettings([{ key: "claude_code_plan", value: next }]);
       await refresh();
-      setNotice("設定を保存しました。");
     } catch (err) {
       setError(String(err));
     }
-  }
+  }, [dashboard, refresh]);
 
   return (
     <main className="appShell">
       <Titlebar
-        showSettings={showSettings}
         onReload={() => {
           scanAndRefresh().catch((err) => setError(String(err)));
         }}
-        onToggleSettings={() => setShowSettings((current) => !current)}
       />
       <section className="workspace">
         <header className="pageHead">
-          <h1>{showSettings ? "設定" : "MANA STATUS"}</h1>
+          <h1>MANA STATUS</h1>
           <p className="refreshLine">
             auto-sync
             {lastUpdatedAt
@@ -92,13 +90,13 @@ export function App() {
         </header>
 
         {error ? <div className="alert danger">{error}</div> : null}
-        {notice ? <div className="alert success">{notice}</div> : null}
 
-        {showSettings && settings ? (
-          <SettingsPanel settings={settings} onSave={saveSettings} />
-        ) : (
-          <DashboardView dashboard={dashboard} settings={settings} now={now} />
-        )}
+        <DashboardView
+          dashboard={dashboard}
+          settings={settings}
+          now={now}
+          onCyclePlan={cyclePlan}
+        />
       </section>
     </main>
   );
@@ -108,10 +106,12 @@ function DashboardView({
   dashboard,
   settings,
   now,
+  onCyclePlan,
 }: {
   dashboard: Dashboard | null;
   settings: SettingsView | null;
   now: Date;
+  onCyclePlan: () => void;
 }) {
   if (!dashboard) return <EmptyState text="読み込み中です…" />;
 
@@ -127,11 +127,17 @@ function DashboardView({
   const claudePct = claude
     ? quotaRemainingPercent(claude.quotaSessionUsed ?? 0, claude.quotaSessionLimit ?? 0)
     : 100;
+  const planLabel = formatPlanLabel(claude?.quotaPlan ?? "pro");
 
   return (
     <>
       <div className="manaPanel">
-        <ManaRing codexRemainingPercent={codexPct} claudeRemainingPercent={claudePct} />
+        <ManaRing
+          codexRemainingPercent={codexPct}
+          claudeRemainingPercent={claudePct}
+          planLabel={planLabel}
+          onCyclePlan={onCyclePlan}
+        />
       </div>
       <div className="chipGrid">
         {codex ? <CodexChipRail tool={codex} settings={settings} now={now} /> : null}
@@ -226,157 +232,6 @@ function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
         running: tool.isRunning,
       }}
     />
-  );
-}
-
-function SettingsPanel({
-  settings,
-  onSave,
-}: {
-  settings: SettingsView;
-  onSave: (entries: Array<{ key: string; value: string }>) => void;
-}) {
-  const [values, setValues] = useState(settings.values);
-
-  useEffect(() => {
-    setValues(settings.values);
-  }, [settings.values]);
-
-  const updateValue = (key: string, value: string) =>
-    setValues((current) => ({ ...current, [key]: value }));
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    onSave(Object.entries(values).map(([key, value]) => ({ key, value })));
-  }
-
-  return (
-    <form className="settingsPanel" onSubmit={submit}>
-      <section className="settingSection codex">
-        <div className="settingSection__title">Codex 設定</div>
-        <label>
-          Codex 注意ライン 分
-          <input
-            min={0}
-            type="number"
-            value={values.codex_medium_minutes ?? values.medium_minutes ?? "120"}
-            onChange={(event) => updateValue("codex_medium_minutes", event.target.value)}
-          />
-        </label>
-        <label>
-          Codex 上限ライン 分
-          <input
-            min={0}
-            type="number"
-            value={values.codex_high_minutes ?? values.high_minutes ?? "240"}
-            onChange={(event) => updateValue("codex_high_minutes", event.target.value)}
-          />
-        </label>
-        <label>
-          Codex 時間枠 分
-          <input
-            min={1}
-            type="number"
-            value={values.codex_hour_window_minutes ?? "300"}
-            onChange={(event) => updateValue("codex_hour_window_minutes", event.target.value)}
-          />
-        </label>
-        <label>
-          Codex 時間上限 分
-          <input
-            min={0}
-            type="number"
-            value={values.codex_hour_high_minutes ?? "60"}
-            onChange={(event) => updateValue("codex_hour_high_minutes", event.target.value)}
-          />
-        </label>
-        <label>
-          Codex 監視名
-          <input
-            value={values.codex_process_names ?? "codex.exe,codex"}
-            onChange={(event) => updateValue("codex_process_names", event.target.value)}
-          />
-        </label>
-      </section>
-
-      <section className="settingSection claude">
-        <div className="settingSection__title">Claude Code 設定</div>
-        <label>
-          Claude Code プラン
-          <select
-            value={values.claude_code_plan ?? "pro"}
-            onChange={(event) => updateValue("claude_code_plan", event.target.value)}
-          >
-            <option value="pro">Pro</option>
-            <option value="max5">Max 5x</option>
-            <option value="max20">Max 20x</option>
-            <option value="custom">Custom</option>
-          </select>
-        </label>
-        {(values.claude_code_plan ?? "pro") === "custom" ? (
-          <label>
-            Claude Code 5時間枠トークン上限 (Custom)
-            <input
-              min={1}
-              type="number"
-              value={values.claude_code_session_token_limit ?? "70000000"}
-              onChange={(event) =>
-                updateValue("claude_code_session_token_limit", event.target.value)
-              }
-            />
-          </label>
-        ) : null}
-        <label>
-          Claude Code 5時間枠 分
-          <input
-            min={1}
-            type="number"
-            value={values.claude_code_session_window_minutes ?? "300"}
-            onChange={(event) =>
-              updateValue("claude_code_session_window_minutes", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          Claude Code バーンレート計測窓 分
-          <input
-            min={1}
-            type="number"
-            value={values.claude_code_burn_window_minutes ?? "30"}
-            onChange={(event) =>
-              updateValue("claude_code_burn_window_minutes", event.target.value)
-            }
-          />
-        </label>
-        <label>
-          Claude Code 監視名
-          <input
-            value={values.claude_code_process_names ?? "claude.exe,claude-code.exe,claude"}
-            onChange={(event) => updateValue("claude_code_process_names", event.target.value)}
-          />
-        </label>
-      </section>
-
-      <section className="settingSection shared">
-        <div className="settingSection__title">監視設定</div>
-        <label>
-          プロセス監視
-          <select
-            value={values.process_monitor_enabled ?? "1"}
-            onChange={(event) => updateValue("process_monitor_enabled", event.target.value)}
-          >
-            <option value="1">有効</option>
-            <option value="0">無効</option>
-          </select>
-        </label>
-      </section>
-
-      <button className="primaryButton" type="submit">
-        <Save size={14} />
-        設定を保存
-      </button>
-      <p className="storagePath">保存先: {settings.databasePath}</p>
-    </form>
   );
 }
 

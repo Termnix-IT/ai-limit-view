@@ -10,6 +10,15 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => invokeMock(command, args),
 }));
 
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({
+    startDragging: vi.fn(),
+    toggleMaximize: vi.fn(),
+    minimize: vi.fn(),
+    close: vi.fn(),
+  }),
+}));
+
 const emptyDashboard: Dashboard = {
   date: "2026-05-19",
   tools: [
@@ -45,6 +54,7 @@ const emptyDashboard: Dashboard = {
         "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
       isRunning: false,
       activeSessionStartedAt: null,
+      quotaPlan: "pro",
     },
   ],
   recentLogs: [],
@@ -58,22 +68,10 @@ const settings: SettingsView = {
     codex_high_minutes: "240",
     codex_hour_window_minutes: "300",
     codex_hour_high_minutes: "60",
-    claude_code_medium_minutes: "120",
-    claude_code_high_minutes: "360",
-    claude_code_hour_window_minutes: "10080",
-    claude_code_hour_high_minutes: "360",
-    claude_code_session_window_minutes: "300",
-    claude_code_session_message_limit: "45",
-    claude_code_session_token_limit: "70000000",
-    claude_code_weekly_window_minutes: "10080",
-    claude_code_weekly_message_limit: "200",
-    claude_code_weekly_token_limit: "750000000",
-    claude_code_weekly_reset_weekday: "wednesday",
-    claude_code_weekly_reset_hour: "18",
     claude_code_plan: "pro",
+    claude_code_session_window_minutes: "300",
+    claude_code_session_token_limit: "70000000",
     claude_code_burn_window_minutes: "30",
-    medium_launches: "5",
-    high_launches: "10",
     process_monitor_enabled: "1",
     codex_process_names: "codex.exe,codex",
     claude_code_process_names: "claude.exe,claude-code.exe,claude",
@@ -108,10 +106,11 @@ describe("App", () => {
     expect(await screen.findByText("MANA STATUS")).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    // Two MANA % readouts in the centre (CX + CC), both 100% on empty data.
     expect(screen.getAllByText("100%")).toHaveLength(2);
     expect(screen.getAllByText("出力")).toHaveLength(2);
     expect(screen.getAllByText("リチャージ")).toHaveLength(2);
+    // No settings button in titlebar anymore.
+    expect(screen.queryByRole("button", { name: "設定" })).toBeNull();
   });
 
   it("reflects Claude Code quota numbers in the chip rail", async () => {
@@ -135,43 +134,25 @@ describe("App", () => {
 
     render(<App />);
 
-    // Claude Code MANA = 80% remaining (14M of 70M used).
     expect(await screen.findByText("80%")).toBeInTheDocument();
-    // Burn rate chip on Claude side.
     expect(screen.getByText("300.0k tok/分")).toBeInTheDocument();
-    // Codex pace chip: 6 min over 300min window → 1.2 分/h.
     expect(screen.getByText("1.2 分/h")).toBeInTheDocument();
   });
 
-  it("opens settings and switches the Claude plan to custom", async () => {
+  it("cycles the Claude plan when the mana ring center is tapped", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "設定" }));
-    expect(screen.getByText("設定")).toBeInTheDocument();
-    expect(screen.getByLabelText("Codex 上限ライン 分")).toHaveValue(240);
-    expect(screen.getByLabelText("Claude Code プラン")).toHaveValue("pro");
-    expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
+    const ringButton = await screen.findByRole("button", { name: /プラン切替/ });
+    expect(ringButton).toHaveAccessibleName(/Pro/);
 
-    await user.selectOptions(screen.getByLabelText("Claude Code プラン"), "custom");
-    expect(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)")).toHaveValue(
-      70_000_000,
-    );
-    await user.clear(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"));
-    await user.type(
-      screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"),
-      "90000000",
-    );
-    await user.click(screen.getByRole("button", { name: "設定を保存" }));
+    await user.click(ringButton);
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
         "update_settings",
         expect.objectContaining({
-          entries: expect.arrayContaining([
-            { key: "claude_code_plan", value: "custom" },
-            { key: "claude_code_session_token_limit", value: "90000000" },
-          ]),
+          entries: [{ key: "claude_code_plan", value: "max5" }],
         }),
       );
     });

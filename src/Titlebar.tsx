@@ -1,18 +1,15 @@
-import { Gauge, Minus, RefreshCw, Settings, X } from "lucide-react";
+import { Gauge, Minus, RefreshCw, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitlebarProps {
-  showSettings: boolean;
   onReload: () => void;
-  onToggleSettings: () => void;
 }
 
-export function Titlebar({ showSettings, onReload, onToggleSettings }: TitlebarProps) {
+export function Titlebar({ onReload }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    // Buttons (and anything inside .titlebar__actions) should not initiate window drag.
     if (target.closest("button") || target.closest(".titlebar__actions")) return;
     void getCurrentWindow().startDragging();
   };
@@ -43,14 +40,6 @@ export function Titlebar({ showSettings, onReload, onToggleSettings }: TitlebarP
           type="button"
         >
           <RefreshCw size={13} />
-        </button>
-        <button
-          aria-label="設定"
-          className={`titlebar__btn ${showSettings ? "active" : ""}`}
-          onClick={onToggleSettings}
-          type="button"
-        >
-          <Settings size={13} />
         </button>
         <span className="titlebar__divider" aria-hidden="true" />
         <button

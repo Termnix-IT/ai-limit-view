@@ -296,6 +296,43 @@ h2 {
   pointer-events: none;
 }
 
+.manaRing__center--tap {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 160ms ease;
+}
+
+.manaRing__center--tap:hover {
+  transform: scale(1.04);
+}
+
+.manaRing__center--tap:active {
+  transform: scale(0.97);
+}
+
+.manaRing__plan {
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.manaRing__center--tap:hover .manaRing__plan {
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .manaRing__title {
   display: inline-flex;
   align-items: center;
