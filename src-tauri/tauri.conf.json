@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "AI LimitUsage Watcher",
-        "width": 1180,
-        "height": 780,
-        "minWidth": 980,
-        "minHeight": 680
+        "width": 480,
+        "height": 560,
+        "minWidth": 420,
+        "minHeight": 500
       }
     ],
     "security": {
@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "icon": ["icons/icon.ico"]
   }
 }

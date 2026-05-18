@@ -89,7 +89,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole("button", { name: "Status Input" }));
+    await user.click(await screen.findByRole("button", { name: "Input" }));
     await user.type(screen.getByPlaceholderText("例: /status結果: 保存済み"), "/status結果: 保存済み");
     await user.type(screen.getByLabelText("Raw text"), "Codex status sample");
     await user.click(screen.getByRole("button", { name: "Save Status" }));
@@ -125,8 +125,8 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("注意 低")).toBeInTheDocument();
-    expect(screen.getByText("注意 中")).toBeInTheDocument();
-    expect(screen.getByText("注意 高")).toBeInTheDocument();
+    expect(await screen.findByText("余裕あり")).toBeInTheDocument();
+    expect(screen.getByText("注意")).toBeInTheDocument();
+    expect(screen.getByText("制限リスク")).toBeInTheDocument();
   });
 });

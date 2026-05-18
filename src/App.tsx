@@ -42,9 +42,15 @@ const sourceLabels: Record<SourceKind, string> = {
 };
 
 const levelLabels: Record<AttentionLevel, string> = {
-  low: "低",
-  medium: "中",
-  high: "高",
+  low: "余裕あり",
+  medium: "注意",
+  high: "制限リスク",
+};
+
+const levelSubcopy: Record<AttentionLevel, string> = {
+  low: "作業継続リスクは低めです",
+  medium: "使用ペースを確認してください",
+  high: "次の区切りを意識してください",
 };
 
 export function App() {
@@ -54,6 +60,7 @@ export function App() {
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const date = useMemo(() => todayString(), []);
 
   const refresh = useCallback(async () => {
@@ -65,10 +72,18 @@ export function App() {
     setDashboard(dashboardResult);
     setLogs(logsResult);
     setSettings(settingsResult);
+    setLastUpdatedAt(new Date());
   }, [date]);
 
   useEffect(() => {
     refresh().catch((err) => setError(String(err)));
+  }, [refresh]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      refresh().catch((err) => setError(String(err)));
+    }, 5000);
+    return () => window.clearInterval(timer);
   }, [refresh]);
 
   async function runAction(action: () => Promise<unknown>, message: string) {
@@ -85,39 +100,30 @@ export function App() {
 
   return (
     <main className="appShell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div>
-          <div className="brandMark">
-            <Gauge size={22} />
-            <div>
-              <strong>AI LimitUsage Watcher</strong>
-              <span>Local usage monitor</span>
-            </div>
-          </div>
-          <nav className="navList">
-            <NavButton active={activeTab === "dashboard"} icon={<Activity />} label="Dashboard" onClick={() => setActiveTab("dashboard")} />
-            <NavButton active={activeTab === "logs"} icon={<History />} label="Usage Log" onClick={() => setActiveTab("logs")} />
-            <NavButton active={activeTab === "status"} icon={<FileText />} label="Status Input" onClick={() => setActiveTab("status")} />
-            <NavButton active={activeTab === "settings"} icon={<Settings />} label="Settings" onClick={() => setActiveTab("settings")} />
-          </nav>
-        </div>
-        <div className="privacyNote">
-          <ShieldCheck size={18} />
-          <span>Cookie、Token、ブラウザセッションは読み取りません。</span>
-        </div>
-      </aside>
-
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Manual / Official / Estimated</p>
+            <div className="brandMark">
+              <Gauge size={18} />
+              <span>AI LimitUsage Watcher</span>
+            </div>
             <h1>{tabTitle(activeTab)}</h1>
+            <p className="refreshLine">
+              Auto refresh 5s
+              {lastUpdatedAt ? ` / ${lastUpdatedAt.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : ""}
+            </p>
           </div>
-          <button className="ghostButton" onClick={() => void refresh()} type="button">
+          <button aria-label="Refresh" className="iconButton raised" onClick={() => void refresh()} type="button">
             <Clock size={16} />
-            Refresh
           </button>
         </header>
+
+        <nav className="navList" aria-label="Primary navigation">
+          <NavButton active={activeTab === "dashboard"} icon={<Activity />} label="Dashboard" onClick={() => setActiveTab("dashboard")} />
+          <NavButton active={activeTab === "logs"} icon={<History />} label="Log" onClick={() => setActiveTab("logs")} />
+          <NavButton active={activeTab === "status"} icon={<FileText />} label="Input" onClick={() => setActiveTab("status")} />
+          <NavButton active={activeTab === "settings"} icon={<Settings />} label="Settings" onClick={() => setActiveTab("settings")} />
+        </nav>
 
         {error ? <div className="alert danger">{error}</div> : null}
         {notice ? <div className="alert success">{notice}</div> : null}
@@ -141,7 +147,7 @@ function NavButton({ active, icon, label, onClick }: { active: boolean; icon: JS
 }
 
 function DashboardView({ dashboard, onOpenOfficial }: { dashboard: Dashboard | null; onOpenOfficial: (tool: ToolKind) => void }) {
-  if (!dashboard) return <EmptyState text="ダッシュボードを読み込み中です。" />;
+  if (!dashboard) return <EmptyState text="読み込み中です。" />;
 
   return (
     <div className="stack">
@@ -150,11 +156,11 @@ function DashboardView({ dashboard, onOpenOfficial }: { dashboard: Dashboard | n
           <ToolPanel key={`${tool.tool}-${tool.label}`} tool={tool} onOpenOfficial={onOpenOfficial} />
         ))}
       </div>
-      <section className="sectionSurface">
+      <section className="sectionSurface compactRecent">
         <div className="sectionHeader">
           <div>
             <p className="eyebrow">Estimated</p>
-            <h2>直近の使用ログ</h2>
+            <h2>Recent</h2>
           </div>
           <span>{dashboard.recentLogs.length}件</span>
         </div>
@@ -166,25 +172,25 @@ function DashboardView({ dashboard, onOpenOfficial }: { dashboard: Dashboard | n
 
 function ToolPanel({ tool, onOpenOfficial }: { tool: ToolDashboard; onOpenOfficial: (tool: ToolKind) => void }) {
   return (
-    <article className="toolPanel">
+    <article className={`toolPanel ${tool.attentionLevel}`}>
+      <div className="statusStripe" />
       <div className="toolPanelHeader">
-        <div>
-          <p className="eyebrow">Official / Manual / Estimated</p>
-          <h2>{tool.label}</h2>
-        </div>
-        <span className={`levelBadge ${tool.attentionLevel}`}>注意 {levelLabels[tool.attentionLevel]}</span>
+        <h2>{tool.label}</h2>
+        <span className="sourcePill">Estimated</span>
       </div>
-      <div className="metricRow">
-        <Metric label="今日の起動回数" value={`${tool.launchCountToday}`} source="Estimated" />
-        <Metric label="推定使用時間" value={formatMinutes(tool.estimatedMinutesToday)} source="Estimated" />
-        <Metric label="最終使用" value={formatDateTime(tool.lastUsedAt)} source="Estimated" />
+      <div className="riskBlock">
+        <strong>{levelLabels[tool.attentionLevel]}</strong>
+        <span>{levelSubcopy[tool.attentionLevel]}</span>
       </div>
-      <div className="factList">
-        <Fact label="Status / Metrics" value={tool.statusSaved ? tool.latestStatusSummary ?? "保存済み" : "未保存"} source={tool.tool === "codex" ? "Manual" : "Manual"} />
-        <Fact label="手動残量メモ" value={tool.latestManualRemaining ?? "未記録"} source="Manual" />
-        <Fact label="Usage page" value={tool.officialUsageUrl} source="Official" />
+      <div className="quickStats">
+        <Metric label="Today" value={formatMinutes(tool.estimatedMinutesToday)} source="Estimated" />
+        <Metric label="Launches" value={`${tool.launchCountToday}`} source="Estimated" />
       </div>
-      <button className="primaryButton" onClick={() => onOpenOfficial(tool.tool)} type="button">
+      <div className="compactFacts">
+        <Fact label="Last" value={formatDateTime(tool.lastUsedAt)} source="Estimated" />
+        <Fact label="Manual" value={tool.latestManualRemaining ?? (tool.statusSaved ? tool.latestStatusSummary ?? "保存済み" : "未記録")} source="Manual" />
+      </div>
+      <button className="ghostButton fullWidth" onClick={() => onOpenOfficial(tool.tool)} type="button">
         <ExternalLink size={16} />
         Official Usage
       </button>
