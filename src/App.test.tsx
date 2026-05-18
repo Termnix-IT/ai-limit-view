@@ -138,7 +138,7 @@ describe("App", () => {
     expect(screen.getByText("80%")).toBeInTheDocument();
     expect(screen.getByText("CLI 5時間枠 14.00M / 70.00M")).toBeInTheDocument();
     expect(screen.getByText("バーンレート 300.0k tok/分")).toBeInTheDocument();
-    expect(screen.getByText("枯渇予測 2026-05-19 01:00")).toBeInTheDocument();
+    expect(screen.getByText("枯渇予測 2026-05-19 10:00")).toBeInTheDocument();
   });
 
   it("opens settings from the gear button and saves Japanese-labeled settings", async () => {

@@ -72,6 +72,7 @@ export function App() {
               自動更新中
               {lastUpdatedAt
                 ? ` / ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
+                    timeZone: "Asia/Tokyo",
                     hour: "2-digit",
                     minute: "2-digit",
                   })}`
