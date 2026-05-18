@@ -1,8 +1,9 @@
-import { Gauge, RefreshCw, Save, Settings } from "lucide-react";
+import { Save } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { formatDateTime, todayString } from "./date";
 import { ManaRing } from "./ManaRing";
+import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
 import type { Dashboard, SettingsView, ToolDashboard } from "./types";
 
@@ -68,45 +69,26 @@ export function App() {
 
   return (
     <main className="appShell">
+      <Titlebar
+        showSettings={showSettings}
+        onReload={() => {
+          scanAndRefresh().catch((err) => setError(String(err)));
+        }}
+        onToggleSettings={() => setShowSettings((current) => !current)}
+      />
       <section className="workspace">
-        <header className="topbar">
-          <div>
-            <div className="brandMark">
-              <Gauge size={12} />
-              <span>AI LimitUsage Watcher</span>
-            </div>
-            <h1>{showSettings ? "設定" : "MANA STATUS"}</h1>
-            <p className="refreshLine">
-              auto-sync
-              {lastUpdatedAt
-                ? ` · ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
-                    timeZone: "Asia/Tokyo",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}`
-                : ""}
-            </p>
-          </div>
-          <div className="topbarActions">
-            <button
-              aria-label="再読み込み"
-              className="iconButton"
-              onClick={() => {
-                scanAndRefresh().catch((err) => setError(String(err)));
-              }}
-              type="button"
-            >
-              <RefreshCw size={14} />
-            </button>
-            <button
-              aria-label="設定"
-              className={`iconButton ${showSettings ? "active" : ""}`}
-              onClick={() => setShowSettings((current) => !current)}
-              type="button"
-            >
-              <Settings size={14} />
-            </button>
-          </div>
+        <header className="pageHead">
+          <h1>{showSettings ? "設定" : "MANA STATUS"}</h1>
+          <p className="refreshLine">
+            auto-sync
+            {lastUpdatedAt
+              ? ` · ${lastUpdatedAt.toLocaleTimeString("ja-JP", {
+                  timeZone: "Asia/Tokyo",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}`
+              : ""}
+          </p>
         </header>
 
         {error ? <div className="alert danger">{error}</div> : null}
