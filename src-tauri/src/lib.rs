@@ -229,6 +229,10 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     for (key, value) in [
         ("medium_minutes", "120"),
         ("high_minutes", "240"),
+        ("codex_medium_minutes", "120"),
+        ("codex_high_minutes", "240"),
+        ("claude_code_medium_minutes", "120"),
+        ("claude_code_high_minutes", "240"),
         ("medium_launches", "5"),
         ("high_launches", "10"),
         ("process_monitor_enabled", "1"),
@@ -358,6 +362,10 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
             entry.key.as_str(),
             "medium_minutes"
                 | "high_minutes"
+                | "codex_medium_minutes"
+                | "codex_high_minutes"
+                | "claude_code_medium_minutes"
+                | "claude_code_high_minutes"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -368,7 +376,15 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
         }
         if matches!(
             entry.key.as_str(),
-            "medium_minutes" | "high_minutes" | "medium_launches" | "high_launches" | "process_monitor_enabled"
+            "medium_minutes"
+                | "high_minutes"
+                | "codex_medium_minutes"
+                | "codex_high_minutes"
+                | "claude_code_medium_minutes"
+                | "claude_code_high_minutes"
+                | "medium_launches"
+                | "high_launches"
+                | "process_monitor_enabled"
         ) {
             let value = entry
                 .value
@@ -471,7 +487,12 @@ fn tool_dashboard(
         latest_status_summary: latest_status_summary.clone(),
         status_saved: latest_status_summary.is_some(),
         latest_manual_remaining,
-        attention_level: attention_level(estimated_minutes_today, launch_count_today, settings),
+        attention_level: attention_level(
+            tool_key,
+            estimated_minutes_today,
+            launch_count_today,
+            settings,
+        ),
         official_usage_url: official_url(&tool).to_string(),
         is_running: active_session_started_at.is_some(),
         active_session_started_at,
@@ -703,9 +724,17 @@ fn read_settings(conn: &Connection) -> rusqlite::Result<HashMap<String, String>>
     Ok(settings)
 }
 
-fn attention_level(minutes: i64, launches: i64, settings: &HashMap<String, String>) -> String {
-    let medium_minutes = setting_i64(settings, "medium_minutes", 120);
-    let high_minutes = setting_i64(settings, "high_minutes", 240);
+fn attention_level(tool: &str, minutes: i64, launches: i64, settings: &HashMap<String, String>) -> String {
+    let medium_minutes = setting_i64(
+        settings,
+        &format!("{tool}_medium_minutes"),
+        setting_i64(settings, "medium_minutes", 120),
+    );
+    let high_minutes = setting_i64(
+        settings,
+        &format!("{tool}_high_minutes"),
+        setting_i64(settings, "high_minutes", 240),
+    );
     let medium_launches = setting_i64(settings, "medium_launches", 5);
     let high_launches = setting_i64(settings, "high_launches", 10);
 
@@ -775,6 +804,8 @@ mod tests {
 
         assert_eq!(settings.get("medium_minutes"), Some(&"120".to_string()));
         assert_eq!(settings.get("high_launches"), Some(&"10".to_string()));
+        assert_eq!(settings.get("codex_high_minutes"), Some(&"240".to_string()));
+        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"240".to_string()));
         assert_eq!(settings.get("process_monitor_enabled"), Some(&"1".to_string()));
     }
 
@@ -847,6 +878,53 @@ mod tests {
 
         assert_eq!(codex.launch_count_today, 5);
         assert_eq!(codex.attention_level, "medium");
+    }
+
+    #[test]
+    fn attention_level_uses_tool_specific_thresholds() {
+        let conn = memory_conn();
+        conn.execute(
+            "UPDATE settings SET value = '60' WHERE key = 'claude_code_high_minutes'",
+            [],
+        )
+        .expect("update setting");
+        create_usage_session_impl(
+            &conn,
+            UsageSessionInput {
+                tool: ToolKind::Codex,
+                started_at: "2026-05-04T09:00".to_string(),
+                ended_at: None,
+                duration_minutes: 70,
+                source: SourceKind::Manual,
+                confidence: 1.0,
+                note: None,
+            },
+        )
+        .expect("insert codex");
+        create_usage_session_impl(
+            &conn,
+            UsageSessionInput {
+                tool: ToolKind::ClaudeCode,
+                started_at: "2026-05-04T09:00".to_string(),
+                ended_at: None,
+                duration_minutes: 70,
+                source: SourceKind::Manual,
+                confidence: 1.0,
+                note: None,
+            },
+        )
+        .expect("insert claude");
+
+        let dashboard = dashboard_for_date(&conn, "2026-05-04").expect("dashboard");
+        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let claude = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "claude_code")
+            .unwrap();
+
+        assert_eq!(codex.attention_level, "low");
+        assert_eq!(claude.attention_level, "high");
     }
 
     #[test]

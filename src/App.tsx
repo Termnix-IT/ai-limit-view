@@ -109,12 +109,15 @@ function DashboardView({
   settings: SettingsView | null;
 }) {
   if (!dashboard) return <EmptyState text="読み込み中です。" />;
-  const highMinutes = Number(settings?.values.high_minutes ?? 240);
 
   return (
     <div className="toolGrid">
       {dashboard.tools.map((tool) => (
-        <ToolUsage key={`${tool.tool}-${tool.label}`} highMinutes={highMinutes} tool={tool} />
+        <ToolUsage
+          key={`${tool.tool}-${tool.label}`}
+          highMinutes={toolHighMinutes(tool, settings)}
+          tool={tool}
+        />
       ))}
     </div>
   );
@@ -171,21 +174,39 @@ function SettingsPanel({
   return (
     <form className="settingsPanel" onSubmit={submit}>
       <label>
-        注意ライン 分
+        Codex 注意ライン 分
         <input
           min={0}
           type="number"
-          value={values.medium_minutes ?? "120"}
-          onChange={(event) => updateValue("medium_minutes", event.target.value)}
+          value={values.codex_medium_minutes ?? values.medium_minutes ?? "120"}
+          onChange={(event) => updateValue("codex_medium_minutes", event.target.value)}
         />
       </label>
       <label>
-        上限ライン 分
+        Codex 上限ライン 分
         <input
           min={0}
           type="number"
-          value={values.high_minutes ?? "240"}
-          onChange={(event) => updateValue("high_minutes", event.target.value)}
+          value={values.codex_high_minutes ?? values.high_minutes ?? "240"}
+          onChange={(event) => updateValue("codex_high_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 注意ライン 分
+        <input
+          min={0}
+          type="number"
+          value={values.claude_code_medium_minutes ?? values.medium_minutes ?? "120"}
+          onChange={(event) => updateValue("claude_code_medium_minutes", event.target.value)}
+        />
+      </label>
+      <label>
+        Claude Code 上限ライン 分
+        <input
+          min={0}
+          type="number"
+          value={values.claude_code_high_minutes ?? values.high_minutes ?? "240"}
+          onChange={(event) => updateValue("claude_code_high_minutes", event.target.value)}
         />
       </label>
       <label>
@@ -228,4 +249,10 @@ function EmptyState({ text }: { text: string }) {
 function estimatedRemainingPercent(usedMinutes: number, highMinutes: number): number {
   const limit = Number.isFinite(highMinutes) && highMinutes > 0 ? highMinutes : 240;
   return Math.max(0, Math.min(100, Math.round(100 - (usedMinutes / limit) * 100)));
+}
+
+function toolHighMinutes(tool: ToolDashboard, settings: SettingsView | null): number {
+  const fallback = Number(settings?.values.high_minutes ?? 240);
+  const specific = Number(settings?.values[`${tool.tool}_high_minutes`] ?? fallback);
+  return Number.isFinite(specific) && specific > 0 ? specific : fallback;
 }

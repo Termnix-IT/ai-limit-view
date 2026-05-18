@@ -49,6 +49,10 @@ const settings: SettingsView = {
   values: {
     medium_minutes: "120",
     high_minutes: "240",
+    codex_medium_minutes: "120",
+    codex_high_minutes: "240",
+    claude_code_medium_minutes: "120",
+    claude_code_high_minutes: "120",
     medium_launches: "5",
     high_launches: "10",
     process_monitor_enabled: "1",
@@ -90,19 +94,19 @@ describe("App", () => {
     expect(screen.queryByText("Input")).not.toBeInTheDocument();
   });
 
-  it("shows estimated remaining usage room from the high minutes setting", async () => {
+  it("shows estimated remaining usage room from each tool setting", async () => {
     mockBaseResponses({
       ...emptyDashboard,
       tools: [
         { ...emptyDashboard.tools[0], estimatedMinutesToday: 60 },
-        { ...emptyDashboard.tools[1], estimatedMinutesToday: 180 },
+        { ...emptyDashboard.tools[1], estimatedMinutesToday: 60 },
       ],
     });
 
     render(<App />);
 
     expect(await screen.findByText("75%")).toBeInTheDocument();
-    expect(screen.getByText("25%")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
   });
 
   it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
@@ -111,11 +115,12 @@ describe("App", () => {
 
     await user.click(await screen.findByRole("button", { name: "設定" }));
     expect(screen.getByText("設定")).toBeInTheDocument();
-    expect(screen.getByLabelText("上限ライン 分")).toHaveValue(240);
+    expect(screen.getByLabelText("Codex 上限ライン 分")).toHaveValue(240);
+    expect(screen.getByLabelText("Claude Code 上限ライン 分")).toHaveValue(120);
     expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
 
-    await user.clear(screen.getByLabelText("上限ライン 分"));
-    await user.type(screen.getByLabelText("上限ライン 分"), "300");
+    await user.clear(screen.getByLabelText("Claude Code 上限ライン 分"));
+    await user.type(screen.getByLabelText("Claude Code 上限ライン 分"), "300");
     await user.click(screen.getByRole("button", { name: "設定を保存" }));
 
     await waitFor(() => {
@@ -123,7 +128,7 @@ describe("App", () => {
         "update_settings",
         expect.objectContaining({
           entries: expect.arrayContaining([
-            { key: "high_minutes", value: "300" },
+            { key: "claude_code_high_minutes", value: "300" },
           ]),
         }),
       );
