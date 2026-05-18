@@ -60,9 +60,10 @@ export interface ToolDashboard {
   quotaSessionLimit?: number | null;
   quotaSessionResetAt?: string | null;
   quotaSessionWindowMinutes?: number | null;
-  quotaWeeklyUsed?: number | null;
-  quotaWeeklyLimit?: number | null;
-  quotaWeeklyWindowMinutes?: number | null;
+  quotaSessionStartedAt?: string | null;
+  quotaBurnRateTokensPerMin?: number | null;
+  quotaProjectedDepletionAt?: string | null;
+  quotaPlan?: string | null;
 }
 
 export interface Dashboard {

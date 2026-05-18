@@ -1,4 +1,4 @@
-import { Gauge, Save, Settings } from "lucide-react";
+import { Gauge, RefreshCw, Save, Settings } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { formatDateTime, formatMinutes, todayString } from "./date";
@@ -78,14 +78,26 @@ export function App() {
                 : ""}
             </p>
           </div>
-          <button
-            aria-label="設定"
-            className={`iconButton raised ${showSettings ? "active" : ""}`}
-            onClick={() => setShowSettings((current) => !current)}
-            type="button"
-          >
-            <Settings size={16} />
-          </button>
+          <div className="topbarActions">
+            <button
+              aria-label="再読み込み"
+              className="iconButton raised"
+              onClick={() => {
+                scanAndRefresh().catch((err) => setError(String(err)));
+              }}
+              type="button"
+            >
+              <RefreshCw size={16} />
+            </button>
+            <button
+              aria-label="設定"
+              className={`iconButton raised ${showSettings ? "active" : ""}`}
+              onClick={() => setShowSettings((current) => !current)}
+              type="button"
+            >
+              <Settings size={16} />
+            </button>
+          </div>
         </header>
 
         {error ? <div className="alert danger">{error}</div> : null}
@@ -176,61 +188,78 @@ function ToolUsage({
 }
 
 function ClaudeCodeQuotaUsage({ tool }: { tool: ToolDashboard }) {
-  const weeklyUsed = tool.quotaWeeklyUsed ?? 0;
-  const weeklyLimit = tool.quotaWeeklyLimit ?? 0;
   const sessionUsed = tool.quotaSessionUsed ?? 0;
   const sessionLimit = tool.quotaSessionLimit ?? 0;
-  const weeklyRemainingPercent = quotaRemainingPercent(weeklyUsed, weeklyLimit);
   const sessionRemainingPercent = quotaRemainingPercent(sessionUsed, sessionLimit);
-  const weeklyUsedPercent = 100 - weeklyRemainingPercent;
   const sessionUsedPercent = 100 - sessionRemainingPercent;
+  const burnRate = tool.quotaBurnRateTokensPerMin ?? 0;
+  const planLabel = formatPlanLabel(tool.quotaPlan);
 
   return (
     <section
       className="toolUsage"
-      aria-label={`${tool.label} 週間残り ${weeklyRemainingPercent}%`}
+      aria-label={`${tool.label} 5時間枠残り ${sessionRemainingPercent}%`}
     >
       <div className="toolUsageHeader">
         <div>
           <h2>{tool.label}</h2>
-          <span>{tool.isRunning ? "起動中" : "停止中"}</span>
+          <span>{planLabel} / {tool.isRunning ? "起動中" : "停止中"}</span>
         </div>
-        <strong>{weeklyRemainingPercent}%</strong>
+        <strong>{sessionRemainingPercent}%</strong>
       </div>
 
       <div className="usageBar" aria-hidden="true">
-        <div className="usageBarFill" style={{ width: `${weeklyRemainingPercent}%` }} />
-        <div className="usageBarUsed" style={{ width: `${weeklyUsedPercent}%` }} />
+        <div className="usageBarFill" style={{ width: `${sessionRemainingPercent}%` }} />
+        <div className="usageBarUsed" style={{ width: `${sessionUsedPercent}%` }} />
       </div>
 
       <div className="minimalStats">
         <span>
-          CLI 週間トークン {formatTokens(weeklyUsed)} / {formatTokens(weeklyLimit)}
+          CLI 5時間枠 {formatTokens(sessionUsed)} / {formatTokens(sessionLimit)}
         </span>
         <span>最終使用 {formatDateTime(tool.lastUsedAt)}</span>
       </div>
 
       <div className="hourLimit">
         <div className="hourLimitLabel">
+          <span>バーンレート {formatTokens(Math.round(burnRate))} tok/分</span>
           <span>
-            CLI 5時間枠トークン {formatTokens(sessionUsed)} / {formatTokens(sessionLimit)}
+            {tool.quotaSessionResetAt
+              ? `リセット ${formatDateTime(tool.quotaSessionResetAt)}`
+              : "アクティブな5時間枠なし"}
           </span>
-          <strong>{sessionRemainingPercent}%</strong>
-        </div>
-        <div className="usageBar small" aria-hidden="true">
-          <div className="usageBarFill" style={{ width: `${sessionRemainingPercent}%` }} />
-          <div className="usageBarUsed" style={{ width: `${sessionUsedPercent}%` }} />
         </div>
         <div className="minimalStats">
           <span>
-            {tool.quotaSessionResetAt
-              ? `次リセット ${formatDateTime(tool.quotaSessionResetAt)}`
-              : "アクティブな5時間枠なし"}
+            {tool.quotaProjectedDepletionAt
+              ? `枯渇予測 ${formatDateTime(tool.quotaProjectedDepletionAt)}`
+              : burnRate > 0
+                ? "リセットまでに余裕あり"
+                : "—"}
           </span>
         </div>
       </div>
     </section>
   );
+}
+
+function formatPlanLabel(plan?: string | null): string {
+  switch ((plan ?? "").toLowerCase()) {
+    case "pro":
+      return "Pro";
+    case "max5":
+    case "max_5":
+    case "max-5":
+      return "Max 5x";
+    case "max20":
+    case "max_20":
+    case "max-20":
+      return "Max 20x";
+    case "custom":
+      return "Custom";
+    default:
+      return plan ?? "—";
+  }
 }
 
 function SettingsPanel({
@@ -293,6 +322,29 @@ function SettingsPanel({
         />
       </label>
       <label>
+        Claude Code プラン
+        <select
+          value={values.claude_code_plan ?? "pro"}
+          onChange={(event) => updateValue("claude_code_plan", event.target.value)}
+        >
+          <option value="pro">Pro</option>
+          <option value="max5">Max 5x</option>
+          <option value="max20">Max 20x</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      {(values.claude_code_plan ?? "pro") === "custom" ? (
+        <label>
+          Claude Code 5時間枠トークン上限 (Custom)
+          <input
+            min={1}
+            type="number"
+            value={values.claude_code_session_token_limit ?? "70000000"}
+            onChange={(event) => updateValue("claude_code_session_token_limit", event.target.value)}
+          />
+        </label>
+      ) : null}
+      <label>
         Claude Code 5時間枠 分
         <input
           min={1}
@@ -302,46 +354,12 @@ function SettingsPanel({
         />
       </label>
       <label>
-        Claude Code 5時間枠トークン上限
+        Claude Code バーンレート計測窓 分
         <input
           min={1}
           type="number"
-          value={values.claude_code_session_token_limit ?? "70000000"}
-          onChange={(event) => updateValue("claude_code_session_token_limit", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code 週次トークン上限
-        <input
-          min={1}
-          type="number"
-          value={values.claude_code_weekly_token_limit ?? "750000000"}
-          onChange={(event) => updateValue("claude_code_weekly_token_limit", event.target.value)}
-        />
-      </label>
-      <label>
-        Claude Code 週次リセット曜日
-        <select
-          value={values.claude_code_weekly_reset_weekday ?? "wednesday"}
-          onChange={(event) => updateValue("claude_code_weekly_reset_weekday", event.target.value)}
-        >
-          <option value="sunday">日</option>
-          <option value="monday">月</option>
-          <option value="tuesday">火</option>
-          <option value="wednesday">水</option>
-          <option value="thursday">木</option>
-          <option value="friday">金</option>
-          <option value="saturday">土</option>
-        </select>
-      </label>
-      <label>
-        Claude Code 週次リセット時刻 (0-23)
-        <input
-          min={0}
-          max={23}
-          type="number"
-          value={values.claude_code_weekly_reset_hour ?? "18"}
-          onChange={(event) => updateValue("claude_code_weekly_reset_hour", event.target.value)}
+          value={values.claude_code_burn_window_minutes ?? "30"}
+          onChange={(event) => updateValue("claude_code_burn_window_minutes", event.target.value)}
         />
       </label>
       <label>

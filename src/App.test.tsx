@@ -63,12 +63,14 @@ const settings: SettingsView = {
     claude_code_hour_high_minutes: "360",
     claude_code_session_window_minutes: "300",
     claude_code_session_message_limit: "45",
-    claude_code_session_token_limit: "2000000",
+    claude_code_session_token_limit: "70000000",
     claude_code_weekly_window_minutes: "10080",
     claude_code_weekly_message_limit: "200",
-    claude_code_weekly_token_limit: "50000000",
+    claude_code_weekly_token_limit: "750000000",
     claude_code_weekly_reset_weekday: "wednesday",
     claude_code_weekly_reset_hour: "18",
+    claude_code_plan: "pro",
+    claude_code_burn_window_minutes: "30",
     medium_launches: "5",
     high_launches: "10",
     process_monitor_enabled: "1",
@@ -117,13 +119,14 @@ describe("App", () => {
         { ...emptyDashboard.tools[0], estimatedMinutesToday: 60, estimatedMinutesWindow: 20 },
         {
           ...emptyDashboard.tools[1],
-          quotaSessionUsed: 400_000,
-          quotaSessionLimit: 2_000_000,
-          quotaSessionResetAt: "2026-05-18T20:00:00Z",
+          quotaSessionUsed: 14_000_000,
+          quotaSessionLimit: 70_000_000,
+          quotaSessionResetAt: "2026-05-19T02:00:00Z",
           quotaSessionWindowMinutes: 300,
-          quotaWeeklyUsed: 10_000_000,
-          quotaWeeklyLimit: 50_000_000,
-          quotaWeeklyWindowMinutes: 10080,
+          quotaSessionStartedAt: "2026-05-18T21:00:00Z",
+          quotaBurnRateTokensPerMin: 300_000,
+          quotaProjectedDepletionAt: "2026-05-19T01:00:00Z",
+          quotaPlan: "pro",
         },
       ],
     });
@@ -131,11 +134,11 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("75%")).toBeInTheDocument();
-    // Claude Code weekly: 10M/50M = 20% used → 80% remaining.
-    // Claude Code session: 400k/2M = 20% used → 80% remaining.
-    expect(screen.getAllByText("80%").length).toBe(2);
-    expect(screen.getByText("CLI 週間トークン 10.00M / 50.00M")).toBeInTheDocument();
-    expect(screen.getByText("CLI 5時間枠トークン 400.0k / 2.00M")).toBeInTheDocument();
+    // Claude Code session: 14M/70M = 20% used → 80% remaining.
+    expect(screen.getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("CLI 5時間枠 14.00M / 70.00M")).toBeInTheDocument();
+    expect(screen.getByText("バーンレート 300.0k tok/分")).toBeInTheDocument();
+    expect(screen.getByText("枯渇予測 2026-05-19 01:00")).toBeInTheDocument();
   });
 
   it("opens settings from the gear button and saves Japanese-labeled settings", async () => {
@@ -146,16 +149,16 @@ describe("App", () => {
     expect(screen.getByText("設定")).toBeInTheDocument();
     expect(screen.getByLabelText("Codex 上限ライン 分")).toHaveValue(240);
     expect(screen.getByLabelText("Codex 時間上限 分")).toHaveValue(60);
-    expect(screen.getByLabelText("Claude Code 5時間枠トークン上限")).toHaveValue(2_000_000);
-    expect(screen.getByLabelText("Claude Code 週次トークン上限")).toHaveValue(50_000_000);
-    expect(screen.getByLabelText("Claude Code 週次リセット曜日")).toHaveValue("wednesday");
-    expect(screen.getByLabelText("Claude Code 週次リセット時刻 (0-23)")).toHaveValue(18);
+    expect(screen.getByLabelText("Claude Code プラン")).toHaveValue("pro");
+    expect(screen.getByLabelText("Claude Code 5時間枠 分")).toHaveValue(300);
+    expect(screen.getByLabelText("Claude Code バーンレート計測窓 分")).toHaveValue(30);
     expect(screen.getByLabelText("プロセス監視")).toHaveValue("1");
 
-    await user.clear(screen.getByLabelText("Claude Code 週次トークン上限"));
-    await user.type(screen.getByLabelText("Claude Code 週次トークン上限"), "60000000");
-    await user.clear(screen.getByLabelText("Claude Code 5時間枠トークン上限"));
-    await user.type(screen.getByLabelText("Claude Code 5時間枠トークン上限"), "3000000");
+    // Switching to Custom should reveal the manual limit input.
+    await user.selectOptions(screen.getByLabelText("Claude Code プラン"), "custom");
+    expect(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)")).toHaveValue(70_000_000);
+    await user.clear(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"));
+    await user.type(screen.getByLabelText("Claude Code 5時間枠トークン上限 (Custom)"), "90000000");
     await user.click(screen.getByRole("button", { name: "設定を保存" }));
 
     await waitFor(() => {
@@ -163,8 +166,8 @@ describe("App", () => {
         "update_settings",
         expect.objectContaining({
           entries: expect.arrayContaining([
-            { key: "claude_code_weekly_token_limit", value: "60000000" },
-            { key: "claude_code_session_token_limit", value: "3000000" },
+            { key: "claude_code_plan", value: "custom" },
+            { key: "claude_code_session_token_limit", value: "90000000" },
           ]),
         }),
       );

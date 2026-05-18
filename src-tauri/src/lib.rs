@@ -1,6 +1,4 @@
-use chrono::{
-    DateTime, Datelike, Duration, FixedOffset, Local, NaiveDateTime, TimeZone, Utc, Weekday,
-};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc, Weekday};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -145,11 +143,13 @@ pub struct ToolDashboard {
     #[serde(skip_serializing_if = "Option::is_none")]
     quota_session_window_minutes: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    quota_weekly_used: Option<i64>,
+    quota_session_started_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    quota_weekly_limit: Option<i64>,
+    quota_burn_rate_tokens_per_min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    quota_weekly_window_minutes: Option<i64>,
+    quota_projected_depletion_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quota_plan: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +269,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("claude_code_weekly_reset_hour", "18"),
         ("claude_code_session_token_limit", "70000000"),
         ("claude_code_weekly_token_limit", "750000000"),
+        ("claude_code_plan", "pro"),
+        ("claude_code_burn_window_minutes", "30"),
     ] {
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
@@ -411,6 +413,8 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_weekly_token_limit"
                 | "claude_code_weekly_reset_weekday"
                 | "claude_code_weekly_reset_hour"
+                | "claude_code_plan"
+                | "claude_code_burn_window_minutes"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -433,6 +437,11 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 return Err("reset hour must be between 0 and 23".to_string());
             }
         }
+        if entry.key == "claude_code_plan" {
+            if plan_token_limit(&entry.value).is_none() && entry.value != "custom" {
+                return Err(format!("invalid plan: {}", entry.value));
+            }
+        }
         if matches!(
             entry.key.as_str(),
             "medium_minutes"
@@ -451,6 +460,7 @@ fn update_settings(entries: Vec<SettingInput>, state: State<AppState>) -> Result
                 | "claude_code_weekly_window_minutes"
                 | "claude_code_weekly_message_limit"
                 | "claude_code_weekly_token_limit"
+                | "claude_code_burn_window_minutes"
                 | "medium_launches"
                 | "high_launches"
                 | "process_monitor_enabled"
@@ -568,44 +578,45 @@ fn tool_dashboard(
         quota_session_limit,
         quota_session_reset_at,
         quota_session_window_minutes,
-        quota_weekly_used,
-        quota_weekly_limit,
-        quota_weekly_window_minutes,
+        quota_session_started_at,
+        quota_burn_rate_tokens_per_min,
+        quota_projected_depletion_at,
+        quota_plan,
     ) = if matches!(tool, ToolKind::ClaudeCode) {
         let default_activity = ClaudeCodeActivity::default();
         let activity = claude_code_activity.unwrap_or(&default_activity);
         let session_window =
             setting_i64(settings, "claude_code_session_window_minutes", 300).max(1);
-        let session_limit = setting_i64(settings, "claude_code_session_token_limit", 70_000_000);
-        let weekly_limit = setting_i64(settings, "claude_code_weekly_token_limit", 750_000_000);
-        let weekday = settings
-            .get("claude_code_weekly_reset_weekday")
-            .and_then(|v| parse_weekday(v))
-            .unwrap_or(Weekday::Wed);
-        let reset_hour = setting_i64(settings, "claude_code_weekly_reset_hour", 18)
-            .clamp(0, 23) as u32;
-        let local_offset = *Local::now().offset();
+        let burn_window =
+            setting_i64(settings, "claude_code_burn_window_minutes", 30).max(1);
+        let plan_value = settings
+            .get("claude_code_plan")
+            .cloned()
+            .unwrap_or_else(|| "pro".to_string());
+        let session_limit = match plan_token_limit(&plan_value) {
+            Some(v) => v,
+            None => setting_i64(settings, "claude_code_session_token_limit", 70_000_000),
+        };
         let now = Utc::now();
         let quota = compute_claude_code_quota(
             activity,
             now,
             session_window,
-            local_offset,
-            weekday,
-            reset_hour,
+            session_limit,
+            burn_window,
         );
-        let weekly_window = quota.weekly_window_minutes;
         (
             Some(quota.session_used),
             Some(session_limit),
             quota.session_reset_at,
             Some(session_window),
-            Some(quota.weekly_used),
-            Some(weekly_limit),
-            Some(weekly_window),
+            quota.session_started_at,
+            Some(quota.burn_rate_tokens_per_min),
+            quota.projected_depletion_at,
+            Some(plan_value),
         )
     } else {
-        (None, None, None, None, None, None, None)
+        (None, None, None, None, None, None, None, None)
     };
 
     Ok(ToolDashboard {
@@ -632,18 +643,31 @@ fn tool_dashboard(
         quota_session_limit,
         quota_session_reset_at,
         quota_session_window_minutes,
-        quota_weekly_used,
-        quota_weekly_limit,
-        quota_weekly_window_minutes,
+        quota_session_started_at,
+        quota_burn_rate_tokens_per_min,
+        quota_projected_depletion_at,
+        quota_plan,
     })
 }
 
 #[derive(Debug, Clone)]
 struct ClaudeCodeQuota {
     session_used: i64,
+    session_started_at: Option<String>,
     session_reset_at: Option<String>,
-    weekly_used: i64,
-    weekly_window_minutes: i64,
+    burn_rate_tokens_per_min: f64,
+    projected_depletion_at: Option<String>,
+}
+
+fn plan_token_limit(plan: &str) -> Option<i64> {
+    // Rough Pro-tier baseline calibrated against an observed 29% session = 20.26M tokens.
+    // Max tiers scale the baseline linearly.
+    match plan.trim().to_ascii_lowercase().as_str() {
+        "pro" => Some(70_000_000),
+        "max5" | "max_5" | "max 5x" | "max-5" => Some(350_000_000),
+        "max20" | "max_20" | "max 20x" | "max-20" => Some(1_400_000_000),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -662,16 +686,14 @@ fn compute_claude_code_quota(
     activity: &ClaudeCodeActivity,
     now: DateTime<Utc>,
     session_window_minutes: i64,
-    local_offset: FixedOffset,
-    weekly_reset_weekday: Weekday,
-    weekly_reset_hour: u32,
+    session_limit: i64,
+    burn_window_minutes: i64,
 ) -> ClaudeCodeQuota {
     let session_window = Duration::minutes(session_window_minutes.max(1));
 
     let mut sorted_prompts = activity.prompts.clone();
     sorted_prompts.sort();
 
-    // Walk forward, opening a new session window when the next prompt falls outside the active one.
     let mut current_window_start: Option<DateTime<Utc>> = None;
     for ts in &sorted_prompts {
         match current_window_start {
@@ -680,7 +702,7 @@ fn compute_claude_code_quota(
         }
     }
 
-    let (session_used, session_reset_at) = match current_window_start {
+    let (session_used, session_started_at, session_reset_at) = match current_window_start {
         Some(start) => {
             let end = start + session_window;
             if now < end {
@@ -690,64 +712,57 @@ fn compute_claude_code_quota(
                     .filter(|ev| ev.timestamp >= start && ev.timestamp < end)
                     .map(|ev| ev.tokens)
                     .sum();
-                (used, Some(end.to_rfc3339()))
+                (used, Some(start.to_rfc3339()), Some(end.to_rfc3339()))
             } else {
-                (0, None)
+                (0, None, None)
             }
         }
-        None => (0, None),
+        None => (0, None, None),
     };
 
-    let weekly_start = most_recent_weekly_reset(
-        now,
-        local_offset,
-        weekly_reset_weekday,
-        weekly_reset_hour,
-    );
-    let weekly_used: i64 = activity
-        .token_events
-        .iter()
-        .filter(|ev| ev.timestamp >= weekly_start)
-        .map(|ev| ev.tokens)
-        .sum();
-    let weekly_window_minutes = now
-        .signed_duration_since(weekly_start)
-        .num_minutes()
-        .max(0);
+    let burn_window = Duration::minutes(burn_window_minutes.max(1));
+    let burn_cutoff = now - burn_window;
+    let session_lower_bound = current_window_start.unwrap_or(burn_cutoff);
+    let burn_start = burn_cutoff.max(session_lower_bound);
+    let burn_tokens: i64 = if now > burn_start {
+        activity
+            .token_events
+            .iter()
+            .filter(|ev| ev.timestamp >= burn_start && ev.timestamp <= now)
+            .map(|ev| ev.tokens)
+            .sum()
+    } else {
+        0
+    };
+    let burn_minutes = now.signed_duration_since(burn_start).num_seconds() as f64 / 60.0;
+    let burn_rate_tokens_per_min = if burn_minutes > 0.0 {
+        burn_tokens as f64 / burn_minutes
+    } else {
+        0.0
+    };
+
+    let projected_depletion_at = if burn_rate_tokens_per_min > 0.0
+        && session_limit > 0
+        && session_used < session_limit
+        && current_window_start.is_some()
+    {
+        let remaining = (session_limit - session_used) as f64;
+        let minutes_to_depletion = remaining / burn_rate_tokens_per_min;
+        let depletion = now + Duration::seconds((minutes_to_depletion * 60.0) as i64);
+        // Cap depletion to session reset moment if it would otherwise fall after it.
+        let reset = current_window_start.unwrap() + session_window;
+        Some(depletion.min(reset).to_rfc3339())
+    } else {
+        None
+    };
 
     ClaudeCodeQuota {
         session_used,
+        session_started_at,
         session_reset_at,
-        weekly_used,
-        weekly_window_minutes,
+        burn_rate_tokens_per_min,
+        projected_depletion_at,
     }
-}
-
-fn most_recent_weekly_reset(
-    now: DateTime<Utc>,
-    local_offset: FixedOffset,
-    weekday: Weekday,
-    hour: u32,
-) -> DateTime<Utc> {
-    let now_local = now.with_timezone(&local_offset);
-    let today_diff = (now_local.weekday().num_days_from_monday() as i64
-        - weekday.num_days_from_monday() as i64
-        + 7)
-        % 7;
-    let candidate_date = (now_local - Duration::days(today_diff)).date_naive();
-    let candidate_naive = candidate_date
-        .and_hms_opt(hour, 0, 0)
-        .unwrap_or_else(|| candidate_date.and_hms_opt(0, 0, 0).expect("midnight valid"));
-    let candidate = local_offset
-        .from_local_datetime(&candidate_naive)
-        .single()
-        .unwrap_or_else(|| local_offset.from_utc_datetime(&candidate_naive));
-    let candidate = if candidate > now_local {
-        candidate - Duration::days(7)
-    } else {
-        candidate
-    };
-    candidate.with_timezone(&Utc)
 }
 
 fn parse_weekday(value: &str) -> Option<Weekday> {
@@ -1476,10 +1491,6 @@ mod tests {
         assert!(!codex.is_running);
     }
 
-    fn jst() -> FixedOffset {
-        FixedOffset::east_opt(9 * 3600).unwrap()
-    }
-
     fn ev(ts: &str, tokens: i64) -> TokenEvent {
         TokenEvent {
             timestamp: ts.parse().unwrap(),
@@ -1488,32 +1499,44 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_quota_sums_session_and_weekly_tokens() {
+    fn claude_code_quota_sums_session_tokens_and_burn_rate() {
         let now: DateTime<Utc> = "2026-05-19T00:00:00Z".parse().unwrap();
         let activity = ClaudeCodeActivity {
             prompts: vec![
-                // Before weekly reset (2026-05-13 09:00 UTC)
-                "2026-05-13T08:30:00Z".parse().unwrap(),
-                // After reset, but old session window
-                "2026-05-13T10:00:00Z".parse().unwrap(),
+                // Old session window (>5h before any active prompt)
+                "2026-05-18T10:00:00Z".parse().unwrap(),
                 // Current session starts here (gap > 5h)
                 "2026-05-18T21:00:00Z".parse().unwrap(),
                 "2026-05-18T22:00:00Z".parse().unwrap(),
                 "2026-05-18T23:30:00Z".parse().unwrap(),
             ],
             token_events: vec![
-                ev("2026-05-13T08:30:00Z", 1_000),  // before weekly reset → excluded
-                ev("2026-05-13T10:05:00Z", 5_000),  // weekly only
-                ev("2026-05-18T21:05:00Z", 7_000),  // session + weekly
-                ev("2026-05-18T22:05:00Z", 8_000),  // session + weekly
-                ev("2026-05-18T23:35:00Z", 9_000),  // session + weekly
+                ev("2026-05-18T10:05:00Z", 1_000), // outside current session
+                ev("2026-05-18T21:05:00Z", 7_000),
+                ev("2026-05-18T22:05:00Z", 8_000),
+                ev("2026-05-18T23:35:00Z", 9_000), // within last 30min of now (00:00)
             ],
         };
 
-        let quota = compute_claude_code_quota(&activity, now, 300, jst(), Weekday::Wed, 18);
+        // session_limit 100_000, burn_window 30min.
+        let quota = compute_claude_code_quota(&activity, now, 300, 100_000, 30);
         assert_eq!(quota.session_used, 7_000 + 8_000 + 9_000);
-        assert_eq!(quota.session_reset_at.as_deref(), Some("2026-05-19T02:00:00+00:00"));
-        assert_eq!(quota.weekly_used, 5_000 + 7_000 + 8_000 + 9_000);
+        assert_eq!(
+            quota.session_started_at.as_deref(),
+            Some("2026-05-18T21:00:00+00:00")
+        );
+        assert_eq!(
+            quota.session_reset_at.as_deref(),
+            Some("2026-05-19T02:00:00+00:00")
+        );
+        // Burn rate: tokens in [23:30, 00:00] = 9_000 over 30 min → 300 tok/min
+        assert!((quota.burn_rate_tokens_per_min - 300.0).abs() < 0.001);
+        // Remaining = 100_000 - 24_000 = 76_000 → 76_000 / 300 ≈ 253 min → 00:00 + 253min ≈ 04:13.
+        // But cap to session reset 02:00.
+        assert_eq!(
+            quota.projected_depletion_at.as_deref(),
+            Some("2026-05-19T02:00:00+00:00")
+        );
     }
 
     #[test]
@@ -1524,28 +1547,31 @@ mod tests {
             token_events: vec![ev("2026-05-18T10:05:00Z", 4_200)],
         };
 
-        let quota = compute_claude_code_quota(&activity, now, 300, jst(), Weekday::Wed, 18);
+        let quota = compute_claude_code_quota(&activity, now, 300, 100_000, 30);
         assert_eq!(quota.session_used, 0);
         assert!(quota.session_reset_at.is_none());
-        assert_eq!(quota.weekly_used, 4_200);
+        assert!(quota.projected_depletion_at.is_none());
     }
 
     #[test]
-    fn weekly_reset_rewinds_when_today_is_reset_day_before_hour() {
-        // 2026-05-20 (Wed) 14:00 JST = 2026-05-20 05:00 UTC, before the 18:00 cut-off.
-        // The most recent reset should be the previous Wednesday 18:00 JST.
-        let now: DateTime<Utc> = "2026-05-20T05:00:00Z".parse().unwrap();
-        let start = most_recent_weekly_reset(now, jst(), Weekday::Wed, 18);
-        // 2026-05-13 18:00 JST = 2026-05-13 09:00 UTC
-        assert_eq!(start.to_rfc3339(), "2026-05-13T09:00:00+00:00");
-    }
+    fn claude_code_quota_projects_depletion_within_session() {
+        let now: DateTime<Utc> = "2026-05-19T00:00:00Z".parse().unwrap();
+        let activity = ClaudeCodeActivity {
+            prompts: vec!["2026-05-18T23:00:00Z".parse().unwrap()],
+            token_events: vec![
+                ev("2026-05-18T23:30:00Z", 10_000), // 10k tokens in last 30min
+            ],
+        };
 
-    #[test]
-    fn weekly_reset_picks_today_when_past_reset_hour() {
-        // 2026-05-20 (Wed) 20:00 JST = 2026-05-20 11:00 UTC, after the 18:00 cut-off.
-        let now: DateTime<Utc> = "2026-05-20T11:00:00Z".parse().unwrap();
-        let start = most_recent_weekly_reset(now, jst(), Weekday::Wed, 18);
-        assert_eq!(start.to_rfc3339(), "2026-05-20T09:00:00+00:00");
+        // limit 100k, used 10k, burn 10k / 30min ≈ 333 tok/min.
+        // Remaining 90k / 333 ≈ 270 min → would deplete at 00:00 + 270 = 04:30,
+        // capped to session reset 23:00 + 5h = 04:00.
+        let quota = compute_claude_code_quota(&activity, now, 300, 100_000, 30);
+        assert_eq!(quota.session_used, 10_000);
+        assert_eq!(
+            quota.projected_depletion_at.as_deref(),
+            Some("2026-05-19T04:00:00+00:00")
+        );
     }
 
     #[test]
