@@ -180,6 +180,11 @@ pub fn run() {
                 conn: Mutex::new(conn),
                 database_path,
             });
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
