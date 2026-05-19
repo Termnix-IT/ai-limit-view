@@ -5,7 +5,7 @@ import { formatDateTime, todayString } from "./date";
 import { ManaRing } from "./ManaRing";
 import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
-import type { Dashboard, SettingsView, ToolDashboard } from "./types";
+import type { Dashboard, LimitScope, ManualLimitSummary, SettingsView, ToolDashboard } from "./types";
 
 const PLAN_CYCLE = ["pro", "max5", "max20"] as const;
 
@@ -19,6 +19,8 @@ export function App() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const [minimal, setMinimal] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeRingTool, setActiveRingTool] = useState<ToolDashboard["tool"]>("claude_code");
 
   const refresh = useCallback(async () => {
     const date = todayString();
@@ -94,6 +96,33 @@ export function App() {
     }
   }, [dashboard, refresh]);
 
+  const saveManualLimit = useCallback(
+    async ({
+      tool,
+      scope,
+      remainingPercent,
+      resetAt,
+    }: {
+      tool: ToolDashboard["tool"];
+      scope: LimitScope;
+      remainingPercent: number;
+      resetAt?: string | null;
+    }) => {
+      await api.saveManualLimitEntry({
+        tool,
+        capturedAt: new Date().toISOString(),
+        scope,
+        remainingLabel: `${Math.round(remainingPercent)}%`,
+        remainingPercent,
+        resetAt: resetAt || null,
+        note: scope === "session_5h" ? "Manual 5h session remaining" : "Manual remaining",
+        confidence: 1,
+      });
+      await refresh();
+    },
+    [refresh],
+  );
+
   const syncedAt = lastUpdatedAt
     ? lastUpdatedAt.toLocaleTimeString("ja-JP", {
         timeZone: "Asia/Tokyo",
@@ -110,6 +139,8 @@ export function App() {
           onReload={() => {
             scanAndRefresh().catch((err) => setError(String(err)));
           }}
+          onSettings={() => setSettingsOpen((open) => !open)}
+          settingsOpen={settingsOpen}
           onMinimal={() => {
             void enterMinimal();
           }}
@@ -122,10 +153,16 @@ export function App() {
           dashboard={dashboard}
           settings={settings}
           now={now}
+          activeRingTool={activeRingTool}
+          onSwitchRingTool={setActiveRingTool}
           onCyclePlan={cyclePlan}
           minimal={minimal}
+          settingsOpen={settingsOpen}
           onExitMinimal={() => {
             void exitMinimal();
+          }}
+          onSaveManualLimit={(input) => {
+            saveManualLimit(input).catch((err) => setError(String(err)));
           }}
         />
       </section>
@@ -137,49 +174,113 @@ function DashboardView({
   dashboard,
   settings,
   now,
+  activeRingTool,
+  onSwitchRingTool,
   onCyclePlan,
   minimal,
+  settingsOpen,
   onExitMinimal,
+  onSaveManualLimit,
 }: {
   dashboard: Dashboard | null;
   settings: SettingsView | null;
   now: Date;
+  activeRingTool: ToolDashboard["tool"];
+  onSwitchRingTool: (tool: ToolDashboard["tool"]) => void;
   onCyclePlan: () => void;
   minimal: boolean;
+  settingsOpen: boolean;
   onExitMinimal: () => void;
+  onSaveManualLimit: (input: {
+    tool: ToolDashboard["tool"];
+    scope: LimitScope;
+    remainingPercent: number;
+    resetAt?: string | null;
+  }) => void;
 }) {
   if (!dashboard) return <EmptyState text="読み込み中です…" />;
 
   const codex = dashboard.tools.find((t) => t.tool === "codex");
   const claude = dashboard.tools.find((t) => t.tool === "claude_code");
 
-  const codexPct = codex
+  const codexSession = codex ? manualLimit(codex, "session_5h") : null;
+  const claudeSession = claude ? manualLimit(claude, "session_5h") : null;
+  const codexPct = codexSession?.remainingPercent ?? (codex
     ? estimatedRemainingPercent(
         codex.estimatedMinutesWindow,
         toolHourHighMinutes(codex, settings),
       )
-    : 100;
-  const claudePct = claude
+    : 100);
+  const claudePct = claudeSession?.remainingPercent ?? (claude
     ? quotaRemainingPercent(claude.quotaSessionUsed ?? 0, claude.quotaSessionLimit ?? 0)
-    : 100;
+    : 100);
   const planLabel = formatPlanLabel(claude?.quotaPlan ?? "pro");
 
   return (
     <>
-      <div className="manaPanel">
-        <ManaRing
-          codexRemainingPercent={codexPct}
-          claudeRemainingPercent={claudePct}
-          planLabel={planLabel}
-          onCyclePlan={onCyclePlan}
-          minimal={minimal}
-          onExitMinimal={onExitMinimal}
-        />
-      </div>
-      {minimal ? null : (
+      {settingsOpen && !minimal ? null : (
+        <div className="manaPanel">
+          <ManaRing
+            codexRemainingPercent={codexPct}
+            claudeRemainingPercent={claudePct}
+            activeTool={activeRingTool}
+            planLabel={planLabel}
+            onCyclePlan={onCyclePlan}
+            onSwitchTool={onSwitchRingTool}
+            minimal={minimal}
+            onExitMinimal={onExitMinimal}
+          />
+        </div>
+      )}
+      {minimal || settingsOpen ? null : (
         <div className="chipGrid">
           {codex ? <CodexChipRail tool={codex} settings={settings} now={now} /> : null}
           {claude ? <ClaudeChipRail tool={claude} now={now} /> : null}
+        </div>
+      )}
+      {minimal || !settingsOpen ? null : (
+        <div className="manualGrid">
+          {codex ? (
+            <>
+              <ManualLimitEditor
+                tool={codex}
+                scope="session_5h"
+                label="Codex 5h"
+                limit={manualLimit(codex, "session_5h")}
+                now={now}
+                onSave={onSaveManualLimit}
+              />
+              <ManualLimitEditor
+                tool={codex}
+                scope="weekly"
+                label="Codex Week"
+                limit={manualLimit(codex, "weekly")}
+                now={now}
+                onSave={onSaveManualLimit}
+              />
+            </>
+          ) : null}
+          {claude ? (
+            <>
+              <ManualLimitEditor
+                tool={claude}
+                scope="session_5h"
+                label="Claude 5h"
+                limit={manualLimit(claude, "session_5h")}
+                fallbackResetAt={claude.estimatedSessionResetAt}
+                now={now}
+                onSave={onSaveManualLimit}
+              />
+              <ManualLimitEditor
+                tool={claude}
+                scope="weekly"
+                label="Claude Week"
+                limit={manualLimit(claude, "weekly")}
+                now={now}
+                onSave={onSaveManualLimit}
+              />
+            </>
+          ) : null}
         </div>
       )}
     </>
@@ -206,6 +307,8 @@ function CodexChipRail({
   const sinceLast = relativeTime(tool.lastUsedAt, now);
   const intensity: "calm" | "steady" | "hot" =
     paceMinutesPerHour > 30 ? "hot" : paceMinutesPerHour > 10 ? "steady" : "calm";
+  const sessionLimit = manualLimit(tool, "session_5h");
+  const weeklyLimit = manualLimit(tool, "weekly");
 
   return (
     <ToolChipRail
@@ -213,14 +316,19 @@ function CodexChipRail({
       tool={tool}
       tierLabel="Pro"
       output={{
-        value: `${paceMinutesPerHour.toFixed(1)} 分/h`,
-        tooltip: `直近${windowMinutes}分の累計 ${used} 分 (上限 ${limit} 分)`,
+        label: "5h残",
+        value: sessionLimit?.remainingLabel ?? `${estimatedRemainingPercent(used, limit)}%`,
+        tooltip: sessionLimit
+          ? `手入力 ${formatDateTime(sessionLimit.capturedAt)}`
+          : `推定: 直近${windowMinutes}分の累計 ${used} 分 (上限 ${limit} 分)`,
         intensity,
       }}
       recharge={{
-        label: "枠残り",
-        value: remainingLabel,
-        tooltip: `時間枠 ${windowMinutes} 分のうち残り ${remaining} 分`,
+        label: weeklyLimit ? "週残" : "枠残り",
+        value: weeklyLimit?.remainingLabel ?? remainingLabel,
+        tooltip: weeklyLimit
+          ? `週制限の手入力 ${formatDateTime(weeklyLimit.capturedAt)}`
+          : `時間枠 ${windowMinutes} 分のうち残り ${remaining} 分`,
         warn: remaining > 0 && remaining <= 5,
       }}
       status={{
@@ -237,8 +345,10 @@ function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
   const limit = tool.quotaSessionLimit ?? 0;
   const burn = tool.quotaBurnRateTokensPerMin ?? 0;
   const tierLabel = formatPlanLabel(tool.quotaPlan);
+  const sessionLimit = manualLimit(tool, "session_5h");
+  const weeklyLimit = manualLimit(tool, "weekly");
   const remainingTokens = Math.max(0, limit - used);
-  const rechargeAt = tool.quotaSessionResetAt;
+  const rechargeAt = sessionLimit?.resetAt ?? tool.estimatedSessionResetAt ?? tool.quotaSessionResetAt;
   const rechargeSeconds = rechargeAt ? secondsUntil(rechargeAt, now) : 0;
   const recharge = rechargeAt && rechargeSeconds > 0 ? formatCountdown(rechargeSeconds) : "—";
   const sinceLast = relativeTime(tool.lastUsedAt, now);
@@ -252,17 +362,22 @@ function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
       tool={tool}
       tierLabel={tierLabel}
       output={{
-        value: `${formatTokens(Math.round(burn))} tok/分`,
-        tooltip: `5h枠 ${formatTokens(used)} / ${formatTokens(limit)} (残 ${formatTokens(remainingTokens)})`,
+        label: "5h残",
+        value: sessionLimit?.remainingLabel ?? `${quotaRemainingPercent(used, limit)}%`,
+        tooltip: sessionLimit
+          ? `手入力 ${formatDateTime(sessionLimit.capturedAt)}`
+          : `推定: 5h枠 ${formatTokens(used)} / ${formatTokens(limit)} (残 ${formatTokens(remainingTokens)})`,
         intensity,
       }}
       recharge={{
-        label: "リチャージ",
-        value: recharge,
+        label: weeklyLimit ? "週残" : "リチャージ",
+        value: weeklyLimit?.remainingLabel ?? recharge,
         tooltip: tool.quotaProjectedDepletionAt
           ? `マナ枯渇予測 ${formatDateTime(tool.quotaProjectedDepletionAt)}`
-          : rechargeAt
-            ? `次のリチャージ ${formatDateTime(rechargeAt)}`
+          : weeklyLimit
+            ? `週制限の手入力 ${formatDateTime(weeklyLimit.capturedAt)}`
+            : rechargeAt
+              ? `${sessionLimit?.resetAt ? "手入力リセット" : "推定リセット"} ${formatDateTime(rechargeAt)}`
             : "アクティブな5時間枠なし",
         warn: depletionWarn,
       }}
@@ -272,6 +387,88 @@ function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
         running: tool.isRunning,
       }}
     />
+  );
+}
+
+function ManualLimitEditor({
+  tool,
+  scope,
+  label,
+  limit,
+  fallbackResetAt,
+  now,
+  onSave,
+}: {
+  tool: ToolDashboard;
+  scope: LimitScope;
+  label: string;
+  limit: ManualLimitSummary | null;
+  fallbackResetAt?: string | null;
+  now: Date;
+  onSave: (input: {
+    tool: ToolDashboard["tool"];
+    scope: LimitScope;
+    remainingPercent: number;
+    resetAt?: string | null;
+  }) => void;
+}) {
+  const [percent, setPercent] = useState(() => limit?.remainingPercent?.toString() ?? "");
+  const [resetAt, setResetAt] = useState(() => toDatetimeLocalValue(limit?.resetAt ?? fallbackResetAt));
+  const needsReset = scope !== "manual";
+
+  useEffect(() => {
+    setPercent(limit?.remainingPercent?.toString() ?? "");
+    setResetAt(toDatetimeLocalValue(limit?.resetAt ?? fallbackResetAt));
+  }, [fallbackResetAt, limit?.remainingPercent, limit?.resetAt]);
+
+  const parsedPercent = Number(percent);
+  const canSave = Number.isFinite(parsedPercent) && parsedPercent >= 0 && parsedPercent <= 100;
+  const age = limit ? relativeTime(limit.capturedAt, now) : "未記録";
+  const resetValue = limit?.resetAt ?? fallbackResetAt;
+  const resetLabel = needsReset && resetValue ? formatDateTime(resetValue) : null;
+
+  return (
+    <section className="manualLimit" aria-label={`${label} 手入力残量`}>
+      <div className="manualLimit__head">
+        <strong>{label}</strong>
+        <span>{age}</span>
+      </div>
+      <div className="manualLimit__row">
+        <input
+          aria-label={`${label} 残り%`}
+          inputMode="decimal"
+          min="0"
+          max="100"
+          type="number"
+          value={percent}
+          onChange={(event) => setPercent(event.target.value)}
+          placeholder="残り%"
+        />
+        {needsReset ? (
+          <input
+            aria-label={`${label} リセット時刻`}
+            type="datetime-local"
+            value={resetAt}
+            onChange={(event) => setResetAt(event.target.value)}
+          />
+        ) : null}
+        <button
+          type="button"
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              tool: tool.tool,
+              scope,
+              remainingPercent: Math.round(parsedPercent),
+              resetAt: resetAt ? new Date(resetAt).toISOString() : null,
+            })
+          }
+        >
+          保存
+        </button>
+      </div>
+      {resetLabel ? <div className="manualLimit__hint">終了 {resetLabel}</div> : null}
+    </section>
   );
 }
 
@@ -287,6 +484,10 @@ function estimatedRemainingPercent(usedMinutes: number, highMinutes: number): nu
 function quotaRemainingPercent(used: number, limit: number): number {
   if (!Number.isFinite(limit) || limit <= 0) return 100;
   return Math.max(0, Math.min(100, Math.round(100 - (used / limit) * 100)));
+}
+
+function manualLimit(tool: ToolDashboard, scope: LimitScope): ManualLimitSummary | null {
+  return tool.manualLimits.find((limit) => limit.scope === scope) ?? null;
 }
 
 function formatTokens(tokens: number): string {
@@ -337,6 +538,18 @@ function secondsUntil(iso: string, now: Date): number {
   const target = new Date(iso).getTime();
   if (Number.isNaN(target)) return 0;
   return Math.max(0, Math.floor((target - now.getTime()) / 1000));
+}
+
+function toDatetimeLocalValue(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  const hours = String(parsed.getHours()).padStart(2, "0");
+  const minutes = String(parsed.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 function relativeTime(iso: string | null | undefined, now: Date): string {

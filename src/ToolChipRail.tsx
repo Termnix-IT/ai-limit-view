@@ -6,7 +6,12 @@ import type { ToolDashboard } from "./types";
 interface ToolChipRailProps {
   variant: "codex" | "claude";
   tool: ToolDashboard;
-  output: { value: string; tooltip: string; intensity: "calm" | "steady" | "hot" };
+  output: {
+    label?: string;
+    value: string;
+    tooltip: string;
+    intensity: "calm" | "steady" | "hot";
+  };
   recharge: { label: string; value: string; tooltip: string; warn: boolean };
   status: { value: string; tooltip: string; running: boolean };
   tierLabel: string;
@@ -47,7 +52,7 @@ export function ToolChipRail({
       <div className="chip" title={output.tooltip}>
         <span className="chip__lead">
           <Zap size={12} />
-          出力
+          {output.label ?? "出力"}
         </span>
         <span className="chip__value">{output.value}</span>
       </div>

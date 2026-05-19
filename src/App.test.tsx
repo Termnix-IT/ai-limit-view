@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -44,10 +44,12 @@ const emptyDashboard: Dashboard = {
       latestStatusSummary: null,
       statusSaved: false,
       latestManualRemaining: null,
+      manualLimits: [],
       attentionLevel: "low",
       officialUsageUrl: "https://platform.openai.com/usage",
       isRunning: false,
       activeSessionStartedAt: null,
+      estimatedSessionResetAt: null,
     },
     {
       tool: "claude_code",
@@ -60,11 +62,13 @@ const emptyDashboard: Dashboard = {
       latestStatusSummary: null,
       statusSaved: false,
       latestManualRemaining: null,
+      manualLimits: [],
       attentionLevel: "low",
       officialUsageUrl:
         "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
       isRunning: false,
       activeSessionStartedAt: null,
+      estimatedSessionResetAt: null,
       quotaPlan: "pro",
     },
   ],
@@ -101,6 +105,7 @@ function mockBaseResponses(dashboard: Dashboard = emptyDashboard) {
     if (command === "get_settings") return Promise.resolve(settings);
     if (command === "scan_process_usage") return Promise.resolve();
     if (command === "update_settings") return Promise.resolve();
+    if (command === "save_manual_limit_entry") return Promise.resolve(1);
     return Promise.reject(new Error(`Unexpected command: ${command}`));
   });
 }
@@ -117,14 +122,14 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByText("MANA STATUS")).toBeInTheDocument();
-    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getAllByText("100%")).toHaveLength(2);
-    expect(screen.getAllByText("出力")).toHaveLength(2);
+    expect(screen.getAllByText("100%").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByText("5h残")).toHaveLength(2);
     expect(screen.getByText("枠残り")).toBeInTheDocument();
     expect(screen.getByText("リチャージ")).toBeInTheDocument();
-    // No settings button in titlebar anymore.
-    expect(screen.queryByRole("button", { name: "設定" })).toBeNull();
+    expect(screen.queryByRole("spinbutton", { name: "Codex 5h 残り%" })).toBeNull();
+    expect(screen.getByRole("button", { name: "設定" })).toBeInTheDocument();
   });
 
   it("reflects Claude Code quota numbers in the chip rail", async () => {
@@ -148,16 +153,15 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByText("80%")).toBeInTheDocument();
-    expect(screen.getByText("300.0k tok/分")).toBeInTheDocument();
-    expect(screen.getByText("1.2 分/h")).toBeInTheDocument();
+    expect((await screen.findAllByText("80%")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("5h残")).toHaveLength(2);
   });
 
   it("cycles the Claude plan when the mana ring center is tapped", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const ringButton = await screen.findByRole("button", { name: /プラン切替/ });
+    const ringButton = await screen.findByRole("button", { name: /表示対象切替/ });
     expect(ringButton).toHaveAccessibleName(/Pro/);
 
     await user.click(ringButton);
@@ -200,5 +204,56 @@ describe("App", () => {
     });
 
     expect(await screen.findByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
+  });
+
+  it("saves manual remaining percent for Claude 5h sessions", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "設定" }));
+    const input = await screen.findByRole("spinbutton", { name: "Claude 5h 残り%" });
+    expect(screen.queryByLabelText("Mana 残量")).toBeNull();
+    expect(screen.queryByText("Claude Code")).toBeNull();
+    await user.clear(input);
+    await user.type(input, "42");
+    const editor = input.closest("section");
+    expect(editor).not.toBeNull();
+    await user.click(within(editor as HTMLElement).getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_manual_limit_entry",
+        expect.objectContaining({
+          input: expect.objectContaining({
+            tool: "claude_code",
+            scope: "session_5h",
+            remainingLabel: "42%",
+            remainingPercent: 42,
+          }),
+        }),
+      );
+    });
+  });
+
+  it("shows Codex 5h and weekly manual editors in settings mode", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole("button", { name: "設定" }));
+
+    expect(await screen.findByRole("spinbutton", { name: "Codex 5h 残り%" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Codex Week 残り%" })).toBeInTheDocument();
+  });
+
+  it("switches the mana ring target with the mouse wheel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const ringButton = await screen.findByRole("button", { name: /表示対象切替/ });
+    expect(ringButton).toHaveAccessibleName(/Claude Pro/);
+
+    fireEvent.wheel(ringButton, { deltaY: 1 });
+
+    expect(await screen.findByRole("button", { name: /Codex/ })).toBeInTheDocument();
   });
 });

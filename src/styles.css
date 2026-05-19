@@ -384,6 +384,15 @@ body:has(.appShell--minimal) {
   align-items: baseline;
   gap: 6px;
   font-variant-numeric: tabular-nums;
+  opacity: 0.72;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.manaRing__row.active {
+  opacity: 1;
+  transform: scale(1.08);
 }
 
 .manaRing__row strong {
@@ -522,6 +531,102 @@ body:has(.appShell--minimal) {
 .chip[data-warn="true"] .chip__value {
   color: var(--warn);
   text-shadow: 0 0 8px rgba(255, 216, 102, 0.4);
+}
+
+/* ───── Manual limits ───── */
+
+.manualGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  max-height: none;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.manualLimit {
+  display: grid;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(20, 24, 34, 0.44);
+  backdrop-filter: blur(10px);
+}
+
+.manualLimit:nth-child(1),
+.manualLimit:nth-child(2) {
+  border-color: var(--codex-soft);
+}
+
+.manualLimit:nth-child(3),
+.manualLimit:nth-child(4) {
+  border-color: var(--claude-soft);
+}
+
+.manualLimit__head,
+.manualLimit__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.manualLimit__head {
+  justify-content: space-between;
+  color: var(--ink-mute);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.manualLimit__head strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.manualLimit__row input {
+  min-width: 0;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  padding: 0 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
+  font-size: 11px;
+  outline: none;
+}
+
+.manualLimit__row input[type="number"] {
+  width: 72px;
+}
+
+.manualLimit__row input[type="datetime-local"] {
+  flex: 1 1 auto;
+}
+
+.manualLimit__row input:focus {
+  border-color: rgba(138, 198, 255, 0.45);
+}
+
+.manualLimit__row button {
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  padding: 0 9px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.manualLimit__row button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.manualLimit__hint {
+  color: var(--ink-dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ───── Alerts & loading ───── */

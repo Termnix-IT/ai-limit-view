@@ -80,7 +80,9 @@ pub struct StatusSnapshotInput {
 pub struct ManualLimitEntryInput {
     tool: ToolKind,
     captured_at: String,
+    scope: Option<String>,
     remaining_label: String,
+    remaining_percent: Option<f64>,
     reset_at: Option<String>,
     note: Option<String>,
     confidence: f64,
@@ -118,6 +120,17 @@ pub struct UsageSession {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ManualLimitSummary {
+    scope: String,
+    remaining_label: String,
+    remaining_percent: Option<f64>,
+    reset_at: Option<String>,
+    captured_at: String,
+    confidence: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToolDashboard {
     tool: String,
     label: String,
@@ -129,10 +142,12 @@ pub struct ToolDashboard {
     latest_status_summary: Option<String>,
     status_saved: bool,
     latest_manual_remaining: Option<String>,
+    manual_limits: Vec<ManualLimitSummary>,
     attention_level: String,
     official_usage_url: String,
     is_running: bool,
     active_session_started_at: Option<String>,
+    estimated_session_reset_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     quota_session_used: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -233,7 +248,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tool TEXT NOT NULL CHECK(tool IN ('codex', 'claude_code')),
             captured_at TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'manual',
             remaining_label TEXT NOT NULL,
+            remaining_percent REAL,
             reset_at TEXT,
             note TEXT,
             confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
@@ -247,6 +264,14 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         "#,
     )?;
+
+    add_column_if_missing(
+        conn,
+        "manual_limit_entries",
+        "scope",
+        "TEXT NOT NULL DEFAULT 'manual'",
+    )?;
+    add_column_if_missing(conn, "manual_limit_entries", "remaining_percent", "REAL")?;
 
     let now = now_string();
     for (key, value) in [
@@ -264,7 +289,10 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("high_launches", "10"),
         ("process_monitor_enabled", "1"),
         ("codex_process_names", "codex.exe,codex"),
-        ("claude_code_process_names", "claude.exe,claude-code.exe,claude"),
+        (
+            "claude_code_process_names",
+            "claude.exe,claude-code.exe,claude",
+        ),
         ("claude_code_session_window_minutes", "300"),
         ("claude_code_session_message_limit", "45"),
         ("claude_code_weekly_window_minutes", "10080"),
@@ -294,7 +322,10 @@ fn get_dashboard(date: String, state: State<AppState>) -> Result<Dashboard, Stri
 }
 
 #[tauri::command]
-fn list_usage_logs(filter: Option<UsageLogFilter>, state: State<AppState>) -> Result<Vec<UsageSession>, String> {
+fn list_usage_logs(
+    filter: Option<UsageLogFilter>,
+    state: State<AppState>,
+) -> Result<Vec<UsageSession>, String> {
     let conn = state.conn.lock().map_err(|err| err.to_string())?;
     list_usage_logs_impl(&conn, filter).map_err(|err| err.to_string())
 }
@@ -307,7 +338,11 @@ fn create_usage_session(input: UsageSessionInput, state: State<AppState>) -> Res
 }
 
 #[tauri::command]
-fn update_usage_session(id: i64, input: UsageSessionInput, state: State<AppState>) -> Result<(), String> {
+fn update_usage_session(
+    id: i64,
+    input: UsageSessionInput,
+    state: State<AppState>,
+) -> Result<(), String> {
     validate_session_input(&input)?;
     let conn = state.conn.lock().map_err(|err| err.to_string())?;
     conn.execute(
@@ -361,21 +396,35 @@ fn save_status_snapshot(input: StatusSnapshotInput, state: State<AppState>) -> R
 }
 
 #[tauri::command]
-fn save_manual_limit_entry(input: ManualLimitEntryInput, state: State<AppState>) -> Result<i64, String> {
+fn save_manual_limit_entry(
+    input: ManualLimitEntryInput,
+    state: State<AppState>,
+) -> Result<i64, String> {
     if input.remaining_label.trim().is_empty() {
         return Err("remaining_label is required".to_string());
+    }
+    if let Some(percent) = input.remaining_percent {
+        if !(0.0..=100.0).contains(&percent) {
+            return Err("remaining_percent must be between 0 and 100".to_string());
+        }
     }
     if !(0.0..=1.0).contains(&input.confidence) {
         return Err("confidence must be between 0 and 1".to_string());
     }
+    let scope = input.scope.unwrap_or_else(|| "manual".to_string());
+    if !matches!(scope.as_str(), "manual" | "session_5h" | "weekly") {
+        return Err(format!("unsupported limit scope: {scope}"));
+    }
     let conn = state.conn.lock().map_err(|err| err.to_string())?;
     conn.execute(
-        "INSERT INTO manual_limit_entries (tool, captured_at, remaining_label, reset_at, note, confidence, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO manual_limit_entries (tool, captured_at, scope, remaining_label, remaining_percent, reset_at, note, confidence, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             input.tool.as_str(),
             input.captured_at,
+            scope,
             input.remaining_label,
+            input.remaining_percent,
             input.reset_at,
             input.note,
             input.confidence,
@@ -566,6 +615,7 @@ fn tool_dashboard(
             |row| row.get(0),
         )
         .optional()?;
+    let manual_limits = latest_manual_limits(conn, tool_key)?;
     let active_session_started_at: Option<String> = conn
         .query_row(
             "SELECT started_at FROM usage_sessions
@@ -575,6 +625,15 @@ fn tool_dashboard(
             |row| row.get(0),
         )
         .optional()?;
+    let estimated_session_reset_at = if matches!(tool, ToolKind::ClaudeCode) {
+        latest_session_reset_at(
+            conn,
+            tool_key,
+            setting_i64(settings, "claude_code_session_window_minutes", 300).max(1),
+        )?
+    } else {
+        None
+    };
 
     let (
         quota_session_used,
@@ -590,8 +649,7 @@ fn tool_dashboard(
         let activity = claude_code_activity.unwrap_or(&default_activity);
         let session_window =
             setting_i64(settings, "claude_code_session_window_minutes", 300).max(1);
-        let burn_window =
-            setting_i64(settings, "claude_code_burn_window_minutes", 30).max(1);
+        let burn_window = setting_i64(settings, "claude_code_burn_window_minutes", 30).max(1);
         let plan_value = settings
             .get("claude_code_plan")
             .cloned()
@@ -601,13 +659,8 @@ fn tool_dashboard(
             None => setting_i64(settings, "claude_code_session_token_limit", 70_000_000),
         };
         let now = Utc::now();
-        let quota = compute_claude_code_quota(
-            activity,
-            now,
-            session_window,
-            session_limit,
-            burn_window,
-        );
+        let quota =
+            compute_claude_code_quota(activity, now, session_window, session_limit, burn_window);
         (
             Some(quota.session_used),
             Some(session_limit),
@@ -633,6 +686,7 @@ fn tool_dashboard(
         latest_status_summary: latest_status_summary.clone(),
         status_saved: latest_status_summary.is_some(),
         latest_manual_remaining,
+        manual_limits,
         attention_level: attention_level(
             tool_key,
             estimated_minutes_today,
@@ -642,6 +696,7 @@ fn tool_dashboard(
         official_usage_url: official_url(&tool).to_string(),
         is_running: active_session_started_at.is_some(),
         active_session_started_at,
+        estimated_session_reset_at,
         quota_session_used,
         quota_session_limit,
         quota_session_reset_at,
@@ -781,6 +836,25 @@ fn parse_weekday(value: &str) -> Option<Weekday> {
     }
 }
 
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if !columns.iter().any(|name| name == column) {
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rusqlite::Result<i64> {
     let now = now_string();
     conn.execute(
@@ -801,6 +875,58 @@ fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rus
     Ok(conn.last_insert_rowid())
 }
 
+fn latest_manual_limits(
+    conn: &Connection,
+    tool: &str,
+) -> rusqlite::Result<Vec<ManualLimitSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT scope, remaining_label, remaining_percent, reset_at, captured_at, confidence
+         FROM manual_limit_entries
+         WHERE tool = ?1
+         ORDER BY captured_at DESC, id DESC
+         LIMIT 20",
+    )?;
+    let mut rows = stmt.query(params![tool])?;
+    let mut seen = Vec::<String>::new();
+    let mut limits = Vec::new();
+    while let Some(row) = rows.next()? {
+        let scope: String = row.get(0)?;
+        if seen.iter().any(|value| value == &scope) {
+            continue;
+        }
+        seen.push(scope.clone());
+        limits.push(ManualLimitSummary {
+            scope,
+            remaining_label: row.get(1)?,
+            remaining_percent: row.get(2)?,
+            reset_at: row.get(3)?,
+            captured_at: row.get(4)?,
+            confidence: row.get(5)?,
+        });
+    }
+    Ok(limits)
+}
+
+fn latest_session_reset_at(
+    conn: &Connection,
+    tool: &str,
+    session_window_minutes: i64,
+) -> rusqlite::Result<Option<String>> {
+    let started_at: Option<String> = conn
+        .query_row(
+            "SELECT started_at FROM usage_sessions
+             WHERE tool = ?1
+             ORDER BY started_at DESC, id DESC LIMIT 1",
+            params![tool],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(started_at
+        .as_deref()
+        .and_then(parse_datetime)
+        .map(|started| (started + Duration::minutes(session_window_minutes.max(1))).to_rfc3339()))
+}
+
 fn migrate_claude_code_defaults(conn: &Connection, now: &str) -> rusqlite::Result<()> {
     for (key, old_value, new_value) in [
         ("claude_code_high_minutes", "240", "360"),
@@ -815,7 +941,10 @@ fn migrate_claude_code_defaults(conn: &Connection, now: &str) -> rusqlite::Resul
     Ok(())
 }
 
-fn list_usage_logs_impl(conn: &Connection, filter: Option<UsageLogFilter>) -> rusqlite::Result<Vec<UsageSession>> {
+fn list_usage_logs_impl(
+    conn: &Connection,
+    filter: Option<UsageLogFilter>,
+) -> rusqlite::Result<Vec<UsageSession>> {
     let mut sql = String::from(
         "SELECT id, tool, started_at, ended_at, duration_minutes, source, confidence, note, created_at, updated_at
          FROM usage_sessions",
@@ -880,7 +1009,11 @@ fn settings_view(conn: &Connection, database_path: PathBuf) -> rusqlite::Result<
     })
 }
 
-fn rolling_window_minutes(conn: &Connection, tool: &str, window_minutes: i64) -> rusqlite::Result<i64> {
+fn rolling_window_minutes(
+    conn: &Connection,
+    tool: &str,
+    window_minutes: i64,
+) -> rusqlite::Result<i64> {
     let now = Utc::now();
     let window_start = now - Duration::minutes(window_minutes.max(1));
     let mut stmt = conn.prepare(
@@ -908,7 +1041,10 @@ fn rolling_window_minutes(conn: &Connection, tool: &str, window_minutes: i64) ->
         let overlap_start = started.max(window_start);
         let overlap_end = ended.min(now);
         if overlap_end > overlap_start {
-            total += overlap_end.signed_duration_since(overlap_start).num_minutes().max(0);
+            total += overlap_end
+                .signed_duration_since(overlap_start)
+                .num_minutes()
+                .max(0);
         }
     }
     Ok(total)
@@ -944,7 +1080,11 @@ fn scan_process_usage_impl(conn: &Connection, process_names: &[String]) -> rusql
     Ok(())
 }
 
-fn update_tool_process_state(conn: &Connection, tool: ToolKind, is_running: bool) -> rusqlite::Result<()> {
+fn update_tool_process_state(
+    conn: &Connection,
+    tool: ToolKind,
+    is_running: bool,
+) -> rusqlite::Result<()> {
     let tool_key = tool.as_str();
     let active: Option<(i64, String)> = conn
         .query_row(
@@ -1054,7 +1194,12 @@ fn read_settings(conn: &Connection) -> rusqlite::Result<HashMap<String, String>>
     Ok(settings)
 }
 
-fn attention_level(tool: &str, minutes: i64, launches: i64, settings: &HashMap<String, String>) -> String {
+fn attention_level(
+    tool: &str,
+    minutes: i64,
+    launches: i64,
+    settings: &HashMap<String, String>,
+) -> String {
     let medium_minutes = setting_i64(
         settings,
         &format!("{tool}_medium_minutes"),
@@ -1086,7 +1231,12 @@ fn setting_i64(settings: &HashMap<String, String>, key: &str, default: i64) -> i
 
 fn elapsed_minutes(started_at: &str) -> i64 {
     parse_datetime(started_at)
-        .map(|started| Utc::now().signed_duration_since(started).num_minutes().max(0))
+        .map(|started| {
+            Utc::now()
+                .signed_duration_since(started)
+                .num_minutes()
+                .max(0)
+        })
         .unwrap_or(0)
 }
 
@@ -1143,11 +1293,26 @@ mod tests {
         assert_eq!(settings.get("medium_minutes"), Some(&"120".to_string()));
         assert_eq!(settings.get("high_launches"), Some(&"10".to_string()));
         assert_eq!(settings.get("codex_high_minutes"), Some(&"240".to_string()));
-        assert_eq!(settings.get("codex_hour_high_minutes"), Some(&"60".to_string()));
-        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"360".to_string()));
-        assert_eq!(settings.get("claude_code_hour_window_minutes"), Some(&"10080".to_string()));
-        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"360".to_string()));
-        assert_eq!(settings.get("process_monitor_enabled"), Some(&"1".to_string()));
+        assert_eq!(
+            settings.get("codex_hour_high_minutes"),
+            Some(&"60".to_string())
+        );
+        assert_eq!(
+            settings.get("claude_code_high_minutes"),
+            Some(&"360".to_string())
+        );
+        assert_eq!(
+            settings.get("claude_code_hour_window_minutes"),
+            Some(&"10080".to_string())
+        );
+        assert_eq!(
+            settings.get("claude_code_hour_high_minutes"),
+            Some(&"360".to_string())
+        );
+        assert_eq!(
+            settings.get("process_monitor_enabled"),
+            Some(&"1".to_string())
+        );
     }
 
     #[test]
@@ -1171,9 +1336,85 @@ mod tests {
         migrate(&conn).expect("migrate database");
         let settings = read_settings(&conn).expect("read settings");
 
-        assert_eq!(settings.get("claude_code_high_minutes"), Some(&"360".to_string()));
-        assert_eq!(settings.get("claude_code_hour_window_minutes"), Some(&"10080".to_string()));
-        assert_eq!(settings.get("claude_code_hour_high_minutes"), Some(&"360".to_string()));
+        assert_eq!(
+            settings.get("claude_code_high_minutes"),
+            Some(&"360".to_string())
+        );
+        assert_eq!(
+            settings.get("claude_code_hour_window_minutes"),
+            Some(&"10080".to_string())
+        );
+        assert_eq!(
+            settings.get("claude_code_hour_high_minutes"),
+            Some(&"360".to_string())
+        );
+    }
+
+    #[test]
+    fn dashboard_includes_scoped_manual_limits() {
+        let conn = memory_conn();
+        conn.execute(
+            "INSERT INTO manual_limit_entries
+             (tool, captured_at, scope, remaining_label, remaining_percent, reset_at, note, confidence, created_at)
+             VALUES
+             ('claude_code', '2026-05-19T09:00:00Z', 'session_5h', '50%', 50.0, '2026-05-19T14:00:00Z', NULL, 1.0, '2026-05-19T09:00:00Z'),
+             ('claude_code', '2026-05-19T10:00:00Z', 'session_5h', '42%', 42.0, '2026-05-19T15:00:00Z', NULL, 1.0, '2026-05-19T10:00:00Z'),
+             ('claude_code', '2026-05-19T10:05:00Z', 'weekly', '88%', 88.0, NULL, NULL, 1.0, '2026-05-19T10:05:00Z')",
+            [],
+        )
+        .expect("insert manual limits");
+
+        let dashboard = dashboard_for_date(&conn, "2026-05-19").expect("dashboard");
+        let claude = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "claude_code")
+            .unwrap();
+        let session = claude
+            .manual_limits
+            .iter()
+            .find(|limit| limit.scope == "session_5h")
+            .unwrap();
+        let weekly = claude
+            .manual_limits
+            .iter()
+            .find(|limit| limit.scope == "weekly")
+            .unwrap();
+
+        assert_eq!(session.remaining_label, "42%");
+        assert_eq!(session.remaining_percent, Some(42.0));
+        assert_eq!(session.reset_at.as_deref(), Some("2026-05-19T15:00:00Z"));
+        assert_eq!(weekly.remaining_label, "88%");
+    }
+
+    #[test]
+    fn dashboard_estimates_claude_session_reset_from_latest_session() {
+        let conn = memory_conn();
+        create_usage_session_impl(
+            &conn,
+            UsageSessionInput {
+                tool: ToolKind::ClaudeCode,
+                started_at: "2026-05-19T10:00:00Z".to_string(),
+                ended_at: None,
+                duration_minutes: 0,
+                source: SourceKind::Estimated,
+                confidence: 0.6,
+                note: Some(AUTO_MONITOR_NOTE.to_string()),
+            },
+        )
+        .expect("insert claude session");
+
+        let dashboard = dashboard_for_date(&conn, "2026-05-19").expect("dashboard");
+        let claude = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "claude_code")
+            .unwrap();
+
+        assert_eq!(
+            claude.estimated_session_reset_at.as_deref(),
+            Some("2026-05-19T15:00:00+00:00")
+        );
     }
 
     #[test]
@@ -1207,8 +1448,13 @@ mod tests {
         )
         .expect("insert claude");
 
-        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let dashboard =
+            dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
         let claude = dashboard
             .tools
             .iter()
@@ -1242,7 +1488,11 @@ mod tests {
         }
 
         let dashboard = dashboard_for_date(&conn, "2026-05-04").expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
 
         assert_eq!(codex.launch_count_today, 5);
         assert_eq!(codex.attention_level, "medium");
@@ -1284,8 +1534,13 @@ mod tests {
         )
         .expect("insert claude");
 
-        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let dashboard =
+            dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
         let claude = dashboard
             .tools
             .iter()
@@ -1327,8 +1582,13 @@ mod tests {
         )
         .expect("insert old claude");
 
-        let dashboard = dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let dashboard =
+            dashboard_for_date(&conn, &now.format("%Y-%m-%d").to_string()).expect("dashboard");
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
         let claude = dashboard
             .tools
             .iter()
@@ -1346,14 +1606,22 @@ mod tests {
         scan_process_usage_impl(&conn, &["codex.exe".to_string()]).expect("scan running");
         let dashboard = dashboard_for_date(&conn, &Utc::now().format("%Y-%m-%d").to_string())
             .expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
         assert!(codex.is_running);
         assert_eq!(codex.launch_count_today, 1);
 
         scan_process_usage_impl(&conn, &Vec::<String>::new()).expect("scan stopped");
         let dashboard = dashboard_for_date(&conn, &Utc::now().format("%Y-%m-%d").to_string())
             .expect("dashboard");
-        let codex = dashboard.tools.iter().find(|tool| tool.tool == "codex").unwrap();
+        let codex = dashboard
+            .tools
+            .iter()
+            .find(|tool| tool.tool == "codex")
+            .unwrap();
         assert!(!codex.is_running);
     }
 

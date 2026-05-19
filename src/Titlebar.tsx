@@ -1,14 +1,16 @@
-import { Gauge, Minimize2, Minus, RefreshCw, X } from "lucide-react";
+import { Gauge, Minimize2, Minus, RefreshCw, Settings, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitlebarProps {
   onReload: () => void;
+  onSettings: () => void;
   onMinimal: () => void;
+  settingsOpen: boolean;
   syncedAt?: string | null;
 }
 
-export function Titlebar({ onReload, onMinimal, syncedAt }: TitlebarProps) {
+export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, syncedAt }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -43,6 +45,15 @@ export function Titlebar({ onReload, onMinimal, syncedAt }: TitlebarProps) {
           type="button"
         >
           <RefreshCw size={13} />
+        </button>
+        <button
+          aria-label={settingsOpen ? "設定を閉じる" : "設定"}
+          aria-pressed={settingsOpen}
+          className={`titlebar__btn${settingsOpen ? " active" : ""}`}
+          onClick={onSettings}
+          type="button"
+        >
+          <Settings size={13} />
         </button>
         <span className="titlebar__divider" aria-hidden="true" />
         <button

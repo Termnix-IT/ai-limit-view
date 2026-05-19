@@ -1,13 +1,16 @@
 import { motion } from "framer-motion";
 import { Maximize2, Sparkles } from "lucide-react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, WheelEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { ToolKind } from "./types";
 
 interface ManaRingProps {
   codexRemainingPercent: number;
   claudeRemainingPercent: number;
+  activeTool: ToolKind;
   planLabel: string;
   onCyclePlan: () => void;
+  onSwitchTool: (tool: ToolKind) => void;
   minimal?: boolean;
   onExitMinimal?: () => void;
 }
@@ -28,8 +31,10 @@ const WARN_THRESHOLD = 15;
 export function ManaRing({
   codexRemainingPercent,
   claudeRemainingPercent,
+  activeTool,
   planLabel,
   onCyclePlan,
+  onSwitchTool,
   minimal = false,
   onExitMinimal,
 }: ManaRingProps) {
@@ -39,6 +44,7 @@ export function ManaRing({
   const codexOffset = INNER_C * (1 - codexPct / 100);
   const claudeWarn = claudePct <= WARN_THRESHOLD;
   const codexWarn = codexPct <= WARN_THRESHOLD;
+  const activeLabel = activeTool === "codex" ? "Codex" : `Claude ${planLabel}`;
 
   const handleRimDrag = (event: MouseEvent<HTMLDivElement>) => {
     if (!minimal) return;
@@ -46,6 +52,19 @@ export function ManaRing({
     const target = event.target as HTMLElement;
     if (target.closest("button")) return;
     void getCurrentWindow().startDragging();
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    onSwitchTool(activeTool === "codex" ? "claude_code" : "codex");
+  };
+
+  const handleCenterClick = () => {
+    if (activeTool === "claude_code") {
+      onCyclePlan();
+      return;
+    }
+    onSwitchTool("claude_code");
   };
 
   return (
@@ -168,23 +187,24 @@ export function ManaRing({
       <button
         type="button"
         className="manaRing__center manaRing__center--tap"
-        onClick={onCyclePlan}
-        aria-label={`プラン切替 (現在 ${planLabel})`}
-        title="クリックでプラン切替"
+        onClick={handleCenterClick}
+        onWheel={handleWheel}
+        aria-label={`表示対象切替 (現在 ${activeLabel})`}
+        title="ホイールで Codex / Claude Code 切替"
       >
         <span className="manaRing__title">
           <Sparkles size={11} />
           MANA
         </span>
-        <span className="manaRing__row claude">
+        <span className={`manaRing__row claude${activeTool === "claude_code" ? " active" : ""}`}>
           <span>CC</span>
           <strong>{Math.round(claudePct)}%</strong>
         </span>
-        <span className="manaRing__row codex">
+        <span className={`manaRing__row codex${activeTool === "codex" ? " active" : ""}`}>
           <span>CX</span>
           <strong>{Math.round(codexPct)}%</strong>
         </span>
-        <span className="manaRing__plan">{planLabel}</span>
+        <span className="manaRing__plan">{activeTool === "codex" ? "Codex" : "Claude"}</span>
       </button>
 
       {minimal && onExitMinimal ? (
