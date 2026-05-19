@@ -121,7 +121,8 @@ describe("App", () => {
     expect(screen.getByText("Claude Code")).toBeInTheDocument();
     expect(screen.getAllByText("100%")).toHaveLength(2);
     expect(screen.getAllByText("出力")).toHaveLength(2);
-    expect(screen.getAllByText("リチャージ")).toHaveLength(2);
+    expect(screen.getByText("枠残り")).toBeInTheDocument();
+    expect(screen.getByText("リチャージ")).toBeInTheDocument();
     // No settings button in titlebar anymore.
     expect(screen.queryByRole("button", { name: "設定" })).toBeNull();
   });

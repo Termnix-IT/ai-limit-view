@@ -3,8 +3,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 use tauri::{Manager, State};
@@ -502,7 +501,6 @@ fn open_official_usage_url(tool: ToolKind) -> Result<(), String> {
 
 fn dashboard_for_date(conn: &Connection, date: &str) -> rusqlite::Result<Dashboard> {
     let settings = read_settings(conn)?;
-    let claude_code_activity = collect_claude_code_activity();
     let tools = vec![
         tool_dashboard(conn, ToolKind::Codex, "Codex", date, &settings, None)?,
         tool_dashboard(
@@ -511,7 +509,7 @@ fn dashboard_for_date(conn: &Connection, date: &str) -> rusqlite::Result<Dashboa
             "Claude Code",
             date,
             &settings,
-            Some(&claude_code_activity),
+            None,
         )?,
     ];
     let recent_logs = list_usage_logs_impl(conn, None)?;
@@ -781,143 +779,6 @@ fn parse_weekday(value: &str) -> Option<Weekday> {
         "sunday" | "sun" | "7" | "0" => Some(Weekday::Sun),
         _ => None,
     }
-}
-
-fn claude_code_projects_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))?;
-    Some(PathBuf::from(home).join(".claude").join("projects"))
-}
-
-fn collect_claude_code_activity() -> ClaudeCodeActivity {
-    let Some(root) = claude_code_projects_dir() else {
-        return ClaudeCodeActivity::default();
-    };
-    let mut activity = ClaudeCodeActivity::default();
-    collect_activity_from_dir(&root, &mut activity);
-    activity
-}
-
-fn collect_activity_from_dir(dir: &Path, out: &mut ClaudeCodeActivity) {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.eq_ignore_ascii_case("subagents"))
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let file_type = match entry.file_type() {
-            Ok(ft) => ft,
-            Err(_) => continue,
-        };
-        if file_type.is_dir() {
-            collect_activity_from_dir(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-            extract_activity_from_jsonl(&path, out);
-        }
-    }
-}
-
-fn extract_activity_from_jsonl(path: &Path, out: &mut ClaudeCodeActivity) {
-    let Ok(file) = fs::File::open(path) else {
-        return;
-    };
-    let reader = BufReader::new(file);
-    // promptId -> earliest timestamp for that prompt turn (used for session boundary).
-    let mut by_prompt: HashMap<String, DateTime<Utc>> = HashMap::new();
-    let mut anonymous_prompts: Vec<DateTime<Utc>> = Vec::new();
-    for line in reader.lines().map_while(Result::ok) {
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        if value.get("isSidechain").and_then(|v| v.as_bool()) == Some(true) {
-            continue;
-        }
-        match value.get("type").and_then(|v| v.as_str()) {
-            Some("user") => {
-                if value.get("userType").and_then(|v| v.as_str()) != Some("external") {
-                    continue;
-                }
-                if is_tool_result_message(&value) {
-                    continue;
-                }
-                let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let Some(ts) = parse_datetime(timestamp) else {
-                    continue;
-                };
-                match value.get("promptId").and_then(|v| v.as_str()) {
-                    Some(prompt_id) => {
-                        by_prompt
-                            .entry(prompt_id.to_string())
-                            .and_modify(|existing| {
-                                if ts < *existing {
-                                    *existing = ts;
-                                }
-                            })
-                            .or_insert(ts);
-                    }
-                    None => anonymous_prompts.push(ts),
-                }
-            }
-            Some("assistant") => {
-                let Some(timestamp) = value.get("timestamp").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                let Some(ts) = parse_datetime(timestamp) else {
-                    continue;
-                };
-                let Some(usage) = value.pointer("/message/usage") else {
-                    continue;
-                };
-                let tokens = sum_assistant_tokens(usage);
-                if tokens > 0 {
-                    out.token_events.push(TokenEvent { timestamp: ts, tokens });
-                }
-            }
-            _ => {}
-        }
-    }
-    out.prompts.extend(by_prompt.into_values());
-    out.prompts.extend(anonymous_prompts);
-}
-
-fn sum_assistant_tokens(usage: &serde_json::Value) -> i64 {
-    fn field(usage: &serde_json::Value, key: &str) -> i64 {
-        usage
-            .get(key)
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0)
-            .max(0)
-    }
-    field(usage, "input_tokens")
-        + field(usage, "cache_creation_input_tokens")
-        + field(usage, "cache_read_input_tokens")
-        + field(usage, "output_tokens")
-}
-
-fn is_tool_result_message(value: &serde_json::Value) -> bool {
-    let Some(content) = value.pointer("/message/content") else {
-        return false;
-    };
-    let Some(array) = content.as_array() else {
-        return false;
-    };
-    if array.is_empty() {
-        return false;
-    }
-    array
-        .iter()
-        .all(|item| item.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
 }
 
 fn create_usage_session_impl(conn: &Connection, input: UsageSessionInput) -> rusqlite::Result<i64> {

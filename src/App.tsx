@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { formatDateTime, todayString } from "./date";
@@ -19,9 +19,9 @@ export function App() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const [minimal, setMinimal] = useState(false);
-  const date = useMemo(() => todayString(), []);
 
   const refresh = useCallback(async () => {
+    const date = todayString();
     const [dashboardResult, settingsResult] = await Promise.all([
       api.getDashboard(date),
       api.getSettings(),
@@ -29,7 +29,7 @@ export function App() {
     setDashboard(dashboardResult);
     setSettings(settingsResult);
     setLastUpdatedAt(new Date());
-  }, [date]);
+  }, []);
 
   const scanAndRefresh = useCallback(async () => {
     await api.scanProcessUsage();
@@ -202,8 +202,7 @@ function CodexChipRail({
   // Output: 「窓内で何分使ったか」を 1 時間あたりに正規化したものをペースとして表示。
   const paceMinutesPerHour = windowMinutes > 0 ? (used / windowMinutes) * 60 : 0;
   const remaining = Math.max(0, limit - used);
-  const rechargeMinutes = computeCodexRecharge(tool, windowMinutes);
-  const recharge = rechargeMinutes > 0 ? formatCountdown(rechargeMinutes * 60) : "—";
+  const remainingLabel = `${remaining}分`;
   const sinceLast = relativeTime(tool.lastUsedAt, now);
   const intensity: "calm" | "steady" | "hot" =
     paceMinutesPerHour > 30 ? "hot" : paceMinutesPerHour > 10 ? "steady" : "calm";
@@ -219,7 +218,8 @@ function CodexChipRail({
         intensity,
       }}
       recharge={{
-        value: recharge,
+        label: "枠残り",
+        value: remainingLabel,
         tooltip: `時間枠 ${windowMinutes} 分のうち残り ${remaining} 分`,
         warn: remaining > 0 && remaining <= 5,
       }}
@@ -257,6 +257,7 @@ function ClaudeChipRail({ tool, now }: { tool: ToolDashboard; now: Date }) {
         intensity,
       }}
       recharge={{
+        label: "リチャージ",
         value: recharge,
         tooltip: tool.quotaProjectedDepletionAt
           ? `マナ枯渇予測 ${formatDateTime(tool.quotaProjectedDepletionAt)}`
@@ -350,13 +351,4 @@ function relativeTime(iso: string | null | undefined, now: Date): string {
   if (hr < 24) return `${hr}時間前`;
   const day = Math.floor(hr / 24);
   return `${day}日前`;
-}
-
-function computeCodexRecharge(tool: ToolDashboard, windowMinutes: number): number {
-  if (!tool.activeSessionStartedAt) return 0;
-  const started = new Date(tool.activeSessionStartedAt).getTime();
-  if (Number.isNaN(started)) return 0;
-  const end = started + windowMinutes * 60_000;
-  const remainingMs = end - Date.now();
-  return remainingMs > 0 ? Math.floor(remainingMs / 60_000) : 0;
 }

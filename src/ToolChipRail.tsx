@@ -7,7 +7,7 @@ interface ToolChipRailProps {
   variant: "codex" | "claude";
   tool: ToolDashboard;
   output: { value: string; tooltip: string; intensity: "calm" | "steady" | "hot" };
-  recharge: { value: string; tooltip: string; warn: boolean };
+  recharge: { label: string; value: string; tooltip: string; warn: boolean };
   status: { value: string; tooltip: string; running: boolean };
   tierLabel: string;
 }
@@ -55,7 +55,7 @@ export function ToolChipRail({
       <div className="chip" data-warn={recharge.warn} title={recharge.tooltip}>
         <span className="chip__lead">
           <BatteryCharging size={12} />
-          リチャージ
+          {recharge.label}
         </span>
         <span className="chip__value">{recharge.value}</span>
       </div>

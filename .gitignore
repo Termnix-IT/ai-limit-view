@@ -1,5 +1,6 @@
 node_modules
 dist
+.claude/
 src-tauri/target
 src-tauri/gen
 *.db
