@@ -2,7 +2,6 @@
   --bg-deep: #0a0d14;
   --bg-mid: #11141d;
   --surface: rgba(20, 24, 34, 0.55);
-  --surface-strong: rgba(28, 32, 44, 0.78);
   --line: rgba(255, 255, 255, 0.07);
   --ink: #f3f4f7;
   --ink-mute: #9aa4b5;
@@ -43,11 +42,7 @@ body {
 
 body {
   margin: 0;
-  min-width: 320px;
-  background:
-    radial-gradient(900px 600px at 18% -10%, rgba(74, 144, 226, 0.14), transparent 60%),
-    radial-gradient(900px 600px at 100% 110%, rgba(255, 140, 66, 0.12), transparent 60%),
-    var(--bg-deep);
+  background: transparent;
   color: var(--ink);
 }
 
@@ -67,12 +62,6 @@ h2 {
   letter-spacing: 0;
 }
 
-h1 {
-  font-size: 14px;
-  line-height: 1.1;
-  font-weight: 800;
-}
-
 h2 {
   font-size: 12px;
   line-height: 1.2;
@@ -83,9 +72,73 @@ h2 {
 
 .appShell {
   height: 100vh;
+  width: 100vw;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: transparent;
+}
+
+.appShell:not(.appShell--minimal) {
+  background:
+    radial-gradient(900px 600px at 18% -10%, rgba(74, 144, 226, 0.14), transparent 60%),
+    radial-gradient(900px 600px at 100% 110%, rgba(255, 140, 66, 0.12), transparent 60%),
+    var(--bg-deep);
+}
+
+.appShell--minimal {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.05), transparent 60%),
+    rgba(8, 11, 18, 0.72) !important;
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  align-items: center;
+  justify-content: center;
+}
+
+html:has(.appShell--minimal),
+body:has(.appShell--minimal) {
+  background: transparent !important;
+}
+
+.appShell--minimal .workspace {
+  flex: 0 0 auto;
+  width: 100vw;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  overflow: visible;
+}
+
+.appShell--minimal .manaPanel {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.appShell--minimal .manaPanel::before {
+  display: none;
+}
+
+.appShell--minimal .manaRing__title,
+.appShell--minimal .manaRing__row,
+.appShell--minimal .manaRing__plan {
+  display: none;
+}
+
+.appShell--minimal .manaRing__center {
+  pointer-events: none;
+}
+
+.manaRing--minimal .manaRing__exitMinimal {
+  top: -6px;
+  right: -6px;
 }
 
 .workspace {
@@ -187,78 +240,6 @@ h2 {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.brandMark {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-mute);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.refreshLine {
-  margin: 2px 0 0;
-  color: var(--ink-dim);
-  font-size: 10px;
-}
-
-.topbarActions {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* ───── Buttons ───── */
-
-.iconButton,
-.primaryButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  color: var(--ink);
-  background: var(--surface);
-  font-size: 12px;
-  font-weight: 800;
-  transition:
-    background-color 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
-}
-
-.iconButton {
-  width: 32px;
-  height: 32px;
-  backdrop-filter: blur(10px);
-}
-
-.iconButton:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  background: var(--surface-strong);
-}
-
-.iconButton.active {
-  border-color: rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.primaryButton {
-  width: 100%;
-  min-height: 36px;
-  border-color: rgba(255, 255, 255, 0.14);
-  background: linear-gradient(135deg, rgba(74, 144, 226, 0.32), rgba(255, 140, 66, 0.32));
-}
-
-.primaryButton:hover {
-  transform: translateY(-1px);
-  background: linear-gradient(135deg, rgba(74, 144, 226, 0.45), rgba(255, 140, 66, 0.45));
-}
-
 /* ───── ManaRing ───── */
 
 .manaPanel {
@@ -289,6 +270,47 @@ h2 {
   width: 200px;
   height: 200px;
   z-index: 1;
+}
+
+.manaRing--minimal {
+  width: 180px;
+  height: 180px;
+}
+
+.manaRing--minimal .manaRing__center {
+  inset: 50px;
+  border-radius: 50%;
+}
+
+.manaRing__exitMinimal {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 50%;
+  background: rgba(8, 10, 16, 0.7);
+  color: var(--ink-mute);
+  opacity: 0;
+  transition:
+    opacity 160ms ease,
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.manaRing--minimal:hover .manaRing__exitMinimal,
+.manaRing__exitMinimal:focus-visible {
+  opacity: 1;
+}
+
+.manaRing__exitMinimal:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .manaRing svg {
@@ -502,92 +524,6 @@ h2 {
   text-shadow: 0 0 8px rgba(255, 216, 102, 0.4);
 }
 
-/* ───── Settings panel ───── */
-
-.settingsPanel {
-  display: grid;
-  gap: 10px;
-}
-
-.settingSection {
-  position: relative;
-  display: grid;
-  gap: 8px;
-  padding: 10px 10px 10px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-  backdrop-filter: blur(10px);
-}
-
-.settingSection::before {
-  content: "";
-  position: absolute;
-  left: 4px;
-  top: 12px;
-  bottom: 12px;
-  width: 3px;
-  border-radius: 99px;
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.settingSection.codex::before {
-  background: linear-gradient(180deg, var(--codex-1), var(--codex-2));
-  box-shadow: 0 0 12px var(--codex-glow);
-}
-
-.settingSection.claude::before {
-  background: linear-gradient(180deg, var(--claude-1), var(--claude-2));
-  box-shadow: 0 0 12px var(--claude-glow);
-}
-
-.settingSection.shared::before {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.15));
-}
-
-.settingSection__title {
-  font-size: 10px;
-  font-weight: 800;
-  color: var(--ink-mute);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-label {
-  display: grid;
-  gap: 4px;
-  color: var(--ink-mute);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-input,
-select {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 7px 9px;
-  color: var(--ink);
-  background: rgba(255, 255, 255, 0.04);
-  outline: none;
-  font-variant-numeric: tabular-nums;
-}
-
-input:focus,
-select:focus {
-  border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-}
-
-.storagePath {
-  margin: 0;
-  overflow: hidden;
-  color: var(--ink-dim);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ───── Alerts & loading ───── */
 
 .alert,
@@ -604,12 +540,6 @@ select:focus {
   border-color: rgba(255, 90, 90, 0.4);
   background: rgba(255, 90, 90, 0.12);
   color: #ffc4c0;
-}
-
-.alert.success {
-  border-color: rgba(120, 220, 160, 0.35);
-  background: rgba(120, 220, 160, 0.12);
-  color: #b8ecc7;
 }
 
 .emptyState {

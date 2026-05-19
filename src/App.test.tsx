@@ -10,12 +10,23 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => invokeMock(command, args),
 }));
 
+const setSizeMock = vi.fn();
+const setAlwaysOnTopMock = vi.fn();
+
 vi.mock("@tauri-apps/api/window", () => ({
+  LogicalSize: class {
+    constructor(
+      public width: number,
+      public height: number,
+    ) {}
+  },
   getCurrentWindow: () => ({
     startDragging: vi.fn(),
     toggleMaximize: vi.fn(),
     minimize: vi.fn(),
     close: vi.fn(),
+    setSize: (size: { width: number; height: number }) => setSizeMock(size),
+    setAlwaysOnTop: (flag: boolean) => setAlwaysOnTopMock(flag),
   }),
 }));
 
@@ -97,6 +108,8 @@ function mockBaseResponses(dashboard: Dashboard = emptyDashboard) {
 describe("App", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    setSizeMock.mockReset();
+    setAlwaysOnTopMock.mockReset();
     mockBaseResponses();
   });
 
@@ -156,5 +169,35 @@ describe("App", () => {
         }),
       );
     });
+  });
+
+  it("enters minimal mode and exits via the hover restore button", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const minimalBtn = await screen.findByRole("button", { name: "ミニマル化" });
+    await user.click(minimalBtn);
+
+    await waitFor(() => {
+      expect(setAlwaysOnTopMock).toHaveBeenCalledWith(true);
+      expect(setSizeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 200, height: 200 }),
+      );
+    });
+
+    expect(screen.queryByRole("button", { name: "ミニマル化" })).toBeNull();
+    expect(screen.queryByText("Codex")).toBeNull();
+
+    const exitBtn = await screen.findByRole("button", { name: "通常モードに戻す" });
+    await user.click(exitBtn);
+
+    await waitFor(() => {
+      expect(setAlwaysOnTopMock).toHaveBeenCalledWith(false);
+      expect(setSizeMock).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 400, height: 380 }),
+      );
+    });
+
+    expect(await screen.findByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
   });
 });

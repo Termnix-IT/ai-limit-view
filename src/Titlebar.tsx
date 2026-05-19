@@ -1,13 +1,14 @@
-import { Gauge, Minus, RefreshCw, X } from "lucide-react";
+import { Gauge, Minimize2, Minus, RefreshCw, X } from "lucide-react";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface TitlebarProps {
   onReload: () => void;
+  onMinimal: () => void;
   syncedAt?: string | null;
 }
 
-export function Titlebar({ onReload, syncedAt }: TitlebarProps) {
+export function Titlebar({ onReload, onMinimal, syncedAt }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -44,6 +45,14 @@ export function Titlebar({ onReload, syncedAt }: TitlebarProps) {
           <RefreshCw size={13} />
         </button>
         <span className="titlebar__divider" aria-hidden="true" />
+        <button
+          aria-label="ミニマル化"
+          className="titlebar__btn"
+          onClick={onMinimal}
+          type="button"
+        >
+          <Minimize2 size={13} />
+        </button>
         <button
           aria-label="最小化"
           className="titlebar__btn"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { formatDateTime, todayString } from "./date";
 import { ManaRing } from "./ManaRing";
@@ -8,12 +9,16 @@ import type { Dashboard, SettingsView, ToolDashboard } from "./types";
 
 const PLAN_CYCLE = ["pro", "max5", "max20"] as const;
 
+const NORMAL_SIZE: [number, number] = [400, 380];
+const MINIMAL_SIZE: [number, number] = [200, 200];
+
 export function App() {
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
+  const [minimal, setMinimal] = useState(false);
   const date = useMemo(() => todayString(), []);
 
   const refresh = useCallback(async () => {
@@ -54,6 +59,28 @@ export function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  const enterMinimal = useCallback(async () => {
+    try {
+      const win = getCurrentWindow();
+      await win.setSize(new LogicalSize(MINIMAL_SIZE[0], MINIMAL_SIZE[1]));
+      await win.setAlwaysOnTop(true);
+      setMinimal(true);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const exitMinimal = useCallback(async () => {
+    try {
+      const win = getCurrentWindow();
+      await win.setAlwaysOnTop(false);
+      await win.setSize(new LogicalSize(NORMAL_SIZE[0], NORMAL_SIZE[1]));
+      setMinimal(false);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
   const cyclePlan = useCallback(async () => {
     const claude = dashboard?.tools.find((t) => t.tool === "claude_code");
     const current = (claude?.quotaPlan ?? "pro").toLowerCase();
@@ -76,21 +103,30 @@ export function App() {
     : null;
 
   return (
-    <main className="appShell">
-      <Titlebar
-        syncedAt={syncedAt}
-        onReload={() => {
-          scanAndRefresh().catch((err) => setError(String(err)));
-        }}
-      />
+    <main className={`appShell${minimal ? " appShell--minimal" : ""}`}>
+      {minimal ? null : (
+        <Titlebar
+          syncedAt={syncedAt}
+          onReload={() => {
+            scanAndRefresh().catch((err) => setError(String(err)));
+          }}
+          onMinimal={() => {
+            void enterMinimal();
+          }}
+        />
+      )}
       <section className="workspace">
-        {error ? <div className="alert danger">{error}</div> : null}
+        {error && !minimal ? <div className="alert danger">{error}</div> : null}
 
         <DashboardView
           dashboard={dashboard}
           settings={settings}
           now={now}
           onCyclePlan={cyclePlan}
+          minimal={minimal}
+          onExitMinimal={() => {
+            void exitMinimal();
+          }}
         />
       </section>
     </main>
@@ -102,11 +138,15 @@ function DashboardView({
   settings,
   now,
   onCyclePlan,
+  minimal,
+  onExitMinimal,
 }: {
   dashboard: Dashboard | null;
   settings: SettingsView | null;
   now: Date;
   onCyclePlan: () => void;
+  minimal: boolean;
+  onExitMinimal: () => void;
 }) {
   if (!dashboard) return <EmptyState text="読み込み中です…" />;
 
@@ -132,12 +172,16 @@ function DashboardView({
           claudeRemainingPercent={claudePct}
           planLabel={planLabel}
           onCyclePlan={onCyclePlan}
+          minimal={minimal}
+          onExitMinimal={onExitMinimal}
         />
       </div>
-      <div className="chipGrid">
-        {codex ? <CodexChipRail tool={codex} settings={settings} now={now} /> : null}
-        {claude ? <ClaudeChipRail tool={claude} now={now} /> : null}
-      </div>
+      {minimal ? null : (
+        <div className="chipGrid">
+          {codex ? <CodexChipRail tool={codex} settings={settings} now={now} /> : null}
+          {claude ? <ClaudeChipRail tool={claude} now={now} /> : null}
+        </div>
+      )}
     </>
   );
 }

@@ -1,11 +1,15 @@
 import { motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Maximize2, Sparkles } from "lucide-react";
+import type { MouseEvent } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 interface ManaRingProps {
   codexRemainingPercent: number;
   claudeRemainingPercent: number;
   planLabel: string;
   onCyclePlan: () => void;
+  minimal?: boolean;
+  onExitMinimal?: () => void;
 }
 
 const SIZE = 200;
@@ -26,6 +30,8 @@ export function ManaRing({
   claudeRemainingPercent,
   planLabel,
   onCyclePlan,
+  minimal = false,
+  onExitMinimal,
 }: ManaRingProps) {
   const claudePct = clamp(claudeRemainingPercent);
   const codexPct = clamp(codexRemainingPercent);
@@ -34,8 +40,20 @@ export function ManaRing({
   const claudeWarn = claudePct <= WARN_THRESHOLD;
   const codexWarn = codexPct <= WARN_THRESHOLD;
 
+  const handleRimDrag = (event: MouseEvent<HTMLDivElement>) => {
+    if (!minimal) return;
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button")) return;
+    void getCurrentWindow().startDragging();
+  };
+
   return (
-    <div className="manaRing" aria-label="Mana 残量">
+    <div
+      className={`manaRing${minimal ? " manaRing--minimal" : ""}`}
+      aria-label="Mana 残量"
+      onMouseDown={handleRimDrag}
+    >
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} role="img">
         <defs>
           <linearGradient id="claudeGrad" x1="0" y1="0" x2="1" y2="1">
@@ -168,6 +186,18 @@ export function ManaRing({
         </span>
         <span className="manaRing__plan">{planLabel}</span>
       </button>
+
+      {minimal && onExitMinimal ? (
+        <button
+          type="button"
+          className="manaRing__exitMinimal"
+          onClick={onExitMinimal}
+          aria-label="通常モードに戻す"
+          title="通常モードに戻す"
+        >
+          <Maximize2 size={12} />
+        </button>
+      ) : null}
     </div>
   );
 }
