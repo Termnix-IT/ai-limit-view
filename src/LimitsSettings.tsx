@@ -1,6 +1,7 @@
 import { RefreshCw } from "lucide-react";
 import { formatDateTime } from "./date";
-import { formatRemaining, formatResetAt, providerStatus } from "./limits";
+import { formatRemaining, formatResetAt } from "./limits";
+import { QuotaStatus } from "./QuotaStatus";
 import type { LiveLimits, LiveProviderLimits } from "./types";
 
 export function LimitsSettings({ limits, refreshing, onRefresh }: {
@@ -35,7 +36,7 @@ function ProviderDetails({ label, variant, provider }: {
     <section className={`providerDetails ${variant}`} aria-label={`${label} 取得状況`}>
       <div className="providerDetails__head">
         <h2>{label}</h2>
-        <span className="quotaBadge" data-ok={provider?.status === "ok"}>{providerStatus(provider)}</span>
+        <QuotaStatus provider={provider} />
       </div>
       <dl>
         <div><dt>取得元</dt><dd>{provider?.source ?? (variant === "codex" ? "Codex app-server" : "OpenUsage")}</dd></div>

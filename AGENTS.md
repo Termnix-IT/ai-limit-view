@@ -2,7 +2,7 @@
 
 ## Project Overview
 - This repository contains `AI LimitUsage Watcher`, a local desktop usage visibility app for Codex and Claude Code.
-- The frontend is a React 18 + TypeScript app built with Vite. The current UI is a compact dark "MANA STATUS" dashboard with animated rings and chip rails.
+- The frontend is a React 18 + TypeScript app built with Vite. The current UI is a compact dark "MANA STATUS" HUD with animated rings, a large selected quota, and inline provider rows.
 - The desktop shell/backend is Tauri v2 with Rust. Quotas come from Codex app-server and bundled OpenUsage; there is no local usage database, process monitoring, manual quota input, or token estimation.
 - The window is undecorated and transparent; custom titlebar controls live in React and use `@tauri-apps/api/window`.
 - User-facing UI text is currently Japanese. Keep technical identifiers, command names, and API names in English.
@@ -23,6 +23,8 @@
 - `src/App.tsx`: main dashboard orchestration, quota polling, minimal-mode sizing, five-hour/weekly scope switching, and dashboard orchestration.
 - `src/ManaRing.tsx`: animated dual-ring MANA visualization; Claude is the outer orange ring and Codex is the inner blue ring.
 - `src/ToolChipRail.tsx`: status rail for five-hour/weekly remaining quotas, retrieval status, and the selected scope reset countdown.
+- `src/QuotaStatus.tsx`: shared retrieval status badge with icons and optional failure details action.
+- `src/ServiceMark.tsx`: decorative SVG provider marks for the inline rail headers.
 - `src/Titlebar.tsx`: custom Tauri titlebar, drag handling, reload, minimal mode, minimize, and close controls.
 - `src/api.ts`: frontend-to-Tauri command names and payload wrappers.
 - `src/types.ts`: shared TypeScript shapes expected from Tauri command serialization.
@@ -34,6 +36,7 @@
 - `src-tauri/src/live_limits.rs`: provider discovery, quota retrieval, safe diagnostics, and Rust tests.
 - `src-tauri/src/process.rs`: hidden child process creation and Windows Job Object lifetime management via process-wrap for Codex and OpenUsage.
 - `src-tauri/tauri.conf.json`: desktop window, dev server, build, and bundle settings; note `decorations: false` and `transparent: true`.
+- `src-tauri/icons/app-icon.png`: selected dual-ring app icon master. Use the existing Tauri CLI `icon` command to generate `icon.ico` and `32x32.png`; the latter is shared by the titlebar and browser favicon.
 
 ## Coding Conventions
 - Keep TypeScript strict and avoid `any`; update `src/types.ts` when changing serialized command payloads or responses.
@@ -43,7 +46,7 @@
 - Keep process-wrap's `KillOnDrop`, `CreationFlags(CREATE_NO_WINDOW)`, and `JobObject` together. Do not unwrap the child or bypass its job ownership. Bound all pipe I/O with the provider deadline.
 - When adding or renaming a Tauri command, update all three places: Rust command function, `tauri::generate_handler!`, and `src/api.ts`.
 - Do not reintroduce manual quotas or local token/time estimates as subscription quota data. Missing provider windows display `—`.
-- Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA dashboard style, circular ring hierarchy, blue Codex/orange Claude color roles, and dense chip layout.
+- Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA HUD, circular ring hierarchy, large selected quota, blue Codex/orange Claude color roles, and inline rows with shared separators. Keep normal mode usable at 400x380 and its minimum 360x340.
 - Use `framer-motion` for existing ring/chip motion patterns instead of introducing another animation library.
 - For custom window controls, call `getCurrentWindow()` from `@tauri-apps/api/window`; avoid native browser window assumptions.
 - Minimal mode resizes the Tauri window to `200x200`, sets always-on-top, and hides chip rails/titlebar. Keep minimal-mode controls reachable and do not add text-heavy UI there.

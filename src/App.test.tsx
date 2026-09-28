@@ -57,6 +57,10 @@ describe("App", () => {
   it("displays live quotas without old plans, recording controls or process status", async () => {
     render(<App />);
     expect(await screen.findByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("94%");
+    expect(ring()).not.toHaveTextContent("85%");
+    expect(within(ring()).getByRole("img", { name: "Claude Code" })).toBeInTheDocument();
+    expect(within(ring()).queryByText(/Codex|Claude Code/)).toBeNull();
     expect(screen.getAllByText("5h残")).toHaveLength(2);
     expect(screen.getAllByText("週残")).toHaveLength(2);
     expect(screen.getAllByText("取得済")).toHaveLength(2);
@@ -71,6 +75,8 @@ describe("App", () => {
     invokeMock.mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect(ring()).toHaveAccessibleName(/5時間/);
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).not.toHaveTextContent("0%");
     expect(screen.getAllByText("取得中")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "再読み込み" })).toBeDisabled();
   });
@@ -80,6 +86,7 @@ describe("App", () => {
     await screen.findByRole("img", { name: /Claude Code 94%/ });
     await user.click(ring());
     expect(screen.getByRole("img", { name: /週間枠：Claude Code 68%、Codex 80%/ })).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("68%");
     expect(screen.getAllByText("週回復")).toHaveLength(2);
     await user.click(ring());
     expect(screen.getByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
@@ -92,8 +99,14 @@ describe("App", () => {
     await user.click(ring());
     fireEvent.wheel(ring(), { deltaY: 1 });
     expect(ring()).toHaveAccessibleName(/週間 \/ Codex/);
+    await waitFor(() => expect(ring()).toHaveTextContent("80%"));
+    expect(ring()).not.toHaveTextContent("68%");
+    expect(within(ring()).getByRole("img", { name: "Codex" })).toBeInTheDocument();
+    expect(within(ring()).queryByRole("img", { name: "Claude Code" })).toBeNull();
+    expect(within(ring()).queryByText(/Codex|Claude Code/)).toBeNull();
     await user.click(ring());
     expect(ring()).toHaveAccessibleName(/5時間 \/ Codex/);
+    expect(ring()).toHaveTextContent("85%");
   });
 
   it("shows unavailable weekly quota as unknown instead of using the five-hour value", async () => {
@@ -102,6 +115,8 @@ describe("App", () => {
     await screen.findByRole("img", { name: /Claude Code 94%/ });
     await user.click(ring());
     expect(screen.getByRole("img", { name: /週間枠：Claude Code 未取得、Codex 80%/ })).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).not.toHaveTextContent("80%");
     const rail = screen.getByRole("region", { name: "Claude Code 状況" });
     expect(within(rail).getAllByText("—")).toHaveLength(2);
   });
@@ -140,6 +155,31 @@ describe("App", () => {
     invokeMock.mockRejectedValue(new Error("backend unavailable")); render(<App />);
     expect(await screen.findAllByText("取得失敗")).toHaveLength(2);
     expect(screen.queryByText("取得中")).toBeNull();
+  });
+
+  it("keeps a failed selected service unknown while the other service succeeds", async () => {
+    mockLimits({ ...liveLimits, claude: {
+      ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+      errorCode: "timeout", message: "Claude の取得がタイムアウトしました。再読み込みしてください。",
+    } });
+    render(<App />);
+    expect(await screen.findByText("時間超過")).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).not.toHaveTextContent("85%");
+    fireEvent.wheel(ring(), { deltaY: 1 });
+    expect(ring()).toHaveTextContent("85%");
+    expect(within(screen.getByRole("region", { name: "Codex 状況" })).getByText("取得済")).toBeInTheDocument();
+  });
+
+  it.each([0, 100])("displays a reported %s percent as a valid quota", async (remainingPercent) => {
+    mockLimits({ ...liveLimits, claude: {
+      ...liveLimits.claude,
+      fiveHour: { usedPercent: 100 - remainingPercent, remainingPercent, resetsAt: null },
+    } });
+    render(<App />);
+    await screen.findByRole("img", { name: new RegExp(`Claude Code ${remainingPercent}%`) });
+    expect(ring()).toHaveTextContent(`${remainingPercent}%`);
+    expect(ring()).not.toHaveTextContent("—");
   });
 
   it.each(["codex", "claude_code"] as const)("displays %s immediately while the other service is pending", async (fast) => {

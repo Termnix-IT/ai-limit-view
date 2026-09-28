@@ -1,4 +1,5 @@
-import { Gauge, Minimize2, Minus, RefreshCw, Settings, X } from "lucide-react";
+import { Minimize2, Minus, RefreshCw, Settings, X } from "lucide-react";
+import appIcon from "../src-tauri/icons/32x32.png";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -33,7 +34,7 @@ export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, synced
       onDoubleClick={handleDoubleClick}
     >
       <div className="titlebar__brand">
-        <Gauge size={12} />
+        <img className="titlebar__icon" src={appIcon} width={16} height={16} alt="" draggable={false} />
         <span>MANA STATUS</span>
         {syncedAt ? <span className="titlebar__sync">· {syncedAt}</span> : null}
       </div>
