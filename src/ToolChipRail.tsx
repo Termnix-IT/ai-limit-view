@@ -1,35 +1,22 @@
 import { motion } from "framer-motion";
-import { BatteryCharging, Swords, Zap } from "lucide-react";
-import { formatDateTime } from "./date";
-import type { ToolDashboard } from "./types";
+import { useState } from "react";
+import { BatteryCharging, TimerReset, Zap } from "lucide-react";
+import { formatRemaining, formatResetAt, formatResetCountdown, limitTooltip, providerStatus } from "./limits";
+import type { LimitScope, LiveProviderLimits } from "./types";
 
-interface ToolChipRailProps {
+const TITLE = { codex: "Codex", claude: "Claude Code" } as const;
+
+export function ToolChipRail({ variant, limits, scope, now }: {
   variant: "codex" | "claude";
-  tool: ToolDashboard;
-  output: {
-    label?: string;
-    value: string;
-    tooltip: string;
-    intensity: "calm" | "steady" | "hot";
-  };
-  recharge: { label: string; value: string; tooltip: string; warn: boolean };
-  status: { value: string; tooltip: string; running: boolean };
-  tierLabel: string;
-}
-
-const TITLE: Record<"codex" | "claude", string> = {
-  codex: "Codex",
-  claude: "Claude Code",
-};
-
-export function ToolChipRail({
-  variant,
-  tool,
-  output,
-  recharge,
-  status,
-  tierLabel,
-}: ToolChipRailProps) {
+  limits: LiveProviderLimits | null;
+  scope: LimitScope;
+  now: Date;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const failed = limits?.status === "unavailable";
+  const activeWindow = limits?.[scope];
+  const resetAt = activeWindow?.resetsAt;
+  const scopeLabel = scope === "fiveHour" ? "5h" : "週";
   return (
     <motion.section
       className={`chipRail ${variant}`}
@@ -40,37 +27,32 @@ export function ToolChipRail({
       aria-label={`${TITLE[variant]} 状況`}
     >
       <div className="chipRail__head">
-        <h2 className="chipRail__title">
-          <span className="dot" aria-hidden="true" />
-          {TITLE[variant]}
-        </h2>
-        <span className="tierBadge" title={`Tier: ${tierLabel}`}>
-          {tierLabel}
-        </span>
+        <h2 className="chipRail__title"><span className="dot" aria-hidden="true" />{TITLE[variant]}</h2>
+        {failed ? (
+          <button
+            type="button"
+            className="quotaBadge quotaBadge--error"
+            title={limits.message ?? "残量を取得できません"}
+            aria-label={`${TITLE[variant]} 残量取得の詳細`}
+            aria-expanded={showDetails}
+            onClick={() => setShowDetails((open) => !open)}
+          >{providerStatus(limits)}</button>
+        ) : (
+          <span className="quotaBadge" title={limits?.source ?? "残量を取得中です"}>{providerStatus(limits)}</span>
+        )}
       </div>
-
-      <div className="chip" title={output.tooltip}>
-        <span className="chip__lead">
-          <Zap size={12} />
-          {output.label ?? "出力"}
-        </span>
-        <span className="chip__value">{output.value}</span>
+      {failed && showDetails ? <div className="quotaDetails" role="status">{limits.message}</div> : null}
+      <div className="chip" data-selected={scope === "fiveHour"} title={limitTooltip(limits, limits?.fiveHour)}>
+        <span className="chip__lead"><Zap size={12} />5h残</span>
+        <span className="chip__value">{formatRemaining(limits?.fiveHour)}</span>
       </div>
-
-      <div className="chip" data-warn={recharge.warn} title={recharge.tooltip}>
-        <span className="chip__lead">
-          <BatteryCharging size={12} />
-          {recharge.label}
-        </span>
-        <span className="chip__value">{recharge.value}</span>
+      <div className="chip" data-selected={scope === "weekly"} data-warn={limits?.weekly != null && limits.weekly.remainingPercent <= 15} title={limitTooltip(limits, limits?.weekly)}>
+        <span className="chip__lead"><BatteryCharging size={12} />週残</span>
+        <span className="chip__value">{formatRemaining(limits?.weekly)}</span>
       </div>
-
-      <div className="chip" title={`${status.tooltip}\n最終使用 ${formatDateTime(tool.lastUsedAt)}`}>
-        <span className="chip__lead">
-          <Swords size={12} />
-          {status.running ? "稼働中" : "待機中"}
-        </span>
-        <span className="chip__value">{status.value}</span>
+      <div className="chip" title={`${scopeLabel}枠のリセット ${formatResetAt(resetAt)}`}>
+        <span className="chip__lead"><TimerReset size={12} />{scopeLabel}回復</span>
+        <span className="chip__value">{formatResetCountdown(resetAt, now)}</span>
       </div>
     </motion.section>
   );

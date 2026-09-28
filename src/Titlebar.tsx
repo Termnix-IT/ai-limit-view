@@ -8,9 +8,10 @@ interface TitlebarProps {
   onMinimal: () => void;
   settingsOpen: boolean;
   syncedAt?: string | null;
+  refreshing: boolean;
 }
 
-export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, syncedAt }: TitlebarProps) {
+export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, syncedAt, refreshing }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -42,12 +43,13 @@ export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, synced
           aria-label="再読み込み"
           className="titlebar__btn"
           onClick={onReload}
+          disabled={refreshing}
           type="button"
         >
           <RefreshCw size={13} />
         </button>
         <button
-          aria-label={settingsOpen ? "設定を閉じる" : "設定"}
+          aria-label={settingsOpen ? "取得状況を閉じる" : "取得状況"}
           aria-pressed={settingsOpen}
           className={`titlebar__btn${settingsOpen ? " active" : ""}`}
           onClick={onSettings}

@@ -2,258 +2,159 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { Dashboard, SettingsView } from "./types";
+import type { LiveLimits } from "./types";
 
 const invokeMock = vi.fn();
-
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => invokeMock(command, args),
 }));
 
 const setSizeMock = vi.fn();
 const setAlwaysOnTopMock = vi.fn();
-
 vi.mock("@tauri-apps/api/window", () => ({
   LogicalSize: class {
-    constructor(
-      public width: number,
-      public height: number,
-    ) {}
+    constructor(public width: number, public height: number) {}
   },
   getCurrentWindow: () => ({
-    startDragging: vi.fn(),
-    toggleMaximize: vi.fn(),
-    minimize: vi.fn(),
-    close: vi.fn(),
+    startDragging: vi.fn(), toggleMaximize: vi.fn(), minimize: vi.fn(), close: vi.fn(),
     setSize: (size: { width: number; height: number }) => setSizeMock(size),
     setAlwaysOnTop: (flag: boolean) => setAlwaysOnTopMock(flag),
   }),
 }));
 
-const emptyDashboard: Dashboard = {
-  date: "2026-05-19",
-  tools: [
-    {
-      tool: "codex",
-      label: "Codex",
-      launchCountToday: 0,
-      estimatedMinutesToday: 0,
-      estimatedMinutesWindow: 0,
-      windowMinutes: 300,
-      lastUsedAt: null,
-      latestStatusSummary: null,
-      statusSaved: false,
-      latestManualRemaining: null,
-      manualLimits: [],
-      attentionLevel: "low",
-      officialUsageUrl: "https://platform.openai.com/usage",
-      isRunning: false,
-      activeSessionStartedAt: null,
-      estimatedSessionResetAt: null,
-    },
-    {
-      tool: "claude_code",
-      label: "Claude Code",
-      launchCountToday: 0,
-      estimatedMinutesToday: 0,
-      estimatedMinutesWindow: 0,
-      windowMinutes: 300,
-      lastUsedAt: null,
-      latestStatusSummary: null,
-      statusSaved: false,
-      latestManualRemaining: null,
-      manualLimits: [],
-      attentionLevel: "low",
-      officialUsageUrl:
-        "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
-      isRunning: false,
-      activeSessionStartedAt: null,
-      estimatedSessionResetAt: null,
-      quotaPlan: "pro",
-    },
-  ],
-  recentLogs: [],
-};
-
-const settings: SettingsView = {
-  values: {
-    medium_minutes: "120",
-    high_minutes: "240",
-    codex_medium_minutes: "120",
-    codex_high_minutes: "240",
-    codex_hour_window_minutes: "300",
-    codex_hour_high_minutes: "60",
-    claude_code_plan: "pro",
-    claude_code_session_window_minutes: "300",
-    claude_code_session_token_limit: "70000000",
-    claude_code_burn_window_minutes: "30",
-    process_monitor_enabled: "1",
-    codex_process_names: "codex.exe,codex",
-    claude_code_process_names: "claude.exe,claude-code.exe,claude",
+const liveLimits: LiveLimits = {
+  codex: {
+    status: "ok", source: "Codex app-server", checkedAt: "2026-09-28T00:00:00Z",
+    fiveHour: { usedPercent: 15, remainingPercent: 85, resetsAt: 1790580000 },
+    weekly: { usedPercent: 20, remainingPercent: 80, resetsAt: 1791052785 },
+    message: null, errorCode: null,
   },
-  databasePath: "C:\\Users\\example\\ai-limitusage-watcher.db",
-  officialUrls: {
-    codex: "https://platform.openai.com/usage",
-    claude_code:
-      "https://support.anthropic.com/en/articles/12157520-claude-code-usage-analytics",
+  claude: {
+    status: "ok", source: "OpenUsage", checkedAt: "2026-09-28T00:00:00Z",
+    fiveHour: { usedPercent: 6, remainingPercent: 94, resetsAt: "2026-09-28T03:00:00Z" },
+    weekly: { usedPercent: 32, remainingPercent: 68, resetsAt: "2026-09-30T09:00:00Z" },
+    message: null, errorCode: null,
   },
 };
 
-function mockBaseResponses(dashboard: Dashboard = emptyDashboard) {
+function mockLimits(limits = liveLimits) {
   invokeMock.mockImplementation((command: string) => {
-    if (command === "get_dashboard") return Promise.resolve(dashboard);
-    if (command === "get_settings") return Promise.resolve(settings);
-    if (command === "scan_process_usage") return Promise.resolve();
-    if (command === "update_settings") return Promise.resolve();
-    if (command === "save_manual_limit_entry") return Promise.resolve(1);
-    return Promise.reject(new Error(`Unexpected command: ${command}`));
+    if (command === "get_live_limits") return Promise.resolve(limits);
+    return Promise.reject(new Error(`Unexpected legacy command: ${command}`));
   });
+}
+
+function ring() {
+  return screen.getByRole("button", { name: /残量枠切替/ });
 }
 
 describe("App", () => {
   beforeEach(() => {
-    invokeMock.mockReset();
-    setSizeMock.mockReset();
-    setAlwaysOnTopMock.mockReset();
-    mockBaseResponses();
+    invokeMock.mockReset(); setSizeMock.mockReset(); setAlwaysOnTopMock.mockReset();
+    mockLimits();
   });
 
-  it("renders the mana status dashboard with both tool rails", async () => {
+  it("displays live quotas without old plans, recording controls or process status", async () => {
     render(<App />);
-
-    expect(await screen.findByText("MANA STATUS")).toBeInTheDocument();
-    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
-    expect(screen.getByText("Claude Code")).toBeInTheDocument();
-    expect(screen.getAllByText("100%").length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
     expect(screen.getAllByText("5h残")).toHaveLength(2);
-    expect(screen.getByText("枠残り")).toBeInTheDocument();
-    expect(screen.getByText("リチャージ")).toBeInTheDocument();
-    expect(screen.queryByRole("spinbutton", { name: "Codex 5h 残り%" })).toBeNull();
-    expect(screen.getByRole("button", { name: "設定" })).toBeInTheDocument();
+    expect(screen.getAllByText("週残")).toHaveLength(2);
+    expect(screen.getAllByText("取得済")).toHaveLength(2);
+    expect(screen.queryByText(/Pro|Max 5x|Max 20x|稼働中|待機中|未記録/)).toBeNull();
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(["get_live_limits"]);
   });
 
-  it("reflects Claude Code quota numbers in the chip rail", async () => {
-    mockBaseResponses({
-      ...emptyDashboard,
-      tools: [
-        { ...emptyDashboard.tools[0], estimatedMinutesWindow: 6 },
-        {
-          ...emptyDashboard.tools[1],
-          quotaSessionUsed: 14_000_000,
-          quotaSessionLimit: 70_000_000,
-          quotaSessionResetAt: "2026-05-19T02:00:00Z",
-          quotaSessionWindowMinutes: 300,
-          quotaSessionStartedAt: "2026-05-18T21:00:00Z",
-          quotaBurnRateTokensPerMin: 300_000,
-          quotaProjectedDepletionAt: "2026-05-19T01:00:00Z",
-          quotaPlan: "pro",
-        },
-      ],
-    });
-
+  it("shows the ring and fetching state while quota retrieval is pending", () => {
+    invokeMock.mockReturnValue(new Promise(() => {}));
     render(<App />);
-
-    expect((await screen.findAllByText("80%")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("5h残")).toHaveLength(2);
+    expect(ring()).toHaveAccessibleName(/5時間/);
+    expect(screen.getAllByText("取得中")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "再読み込み" })).toBeDisabled();
   });
 
-  it("cycles the Claude plan when the mana ring center is tapped", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    const ringButton = await screen.findByRole("button", { name: /表示対象切替/ });
-    expect(ringButton).toHaveAccessibleName(/Pro/);
-
-    await user.click(ringButton);
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith(
-        "update_settings",
-        expect.objectContaining({
-          entries: [{ key: "claude_code_plan", value: "max5" }],
-        }),
-      );
-    });
+  it("switches both rings between five-hour and weekly quotas without saving a plan", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(ring());
+    expect(screen.getByRole("img", { name: /週間枠：Claude Code 68%、Codex 80%/ })).toBeInTheDocument();
+    expect(screen.getAllByText("週回復")).toHaveLength(2);
+    await user.click(ring());
+    expect(screen.getByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
+    expect(screen.getAllByText("5h回復")).toHaveLength(2);
+    expect(invokeMock).toHaveBeenCalledTimes(1);
   });
 
-  it("enters minimal mode and exits via the hover restore button", async () => {
-    const user = userEvent.setup();
-    render(<App />);
+  it("switches the highlighted tool with the wheel while keeping the quota scope", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await user.click(ring());
+    fireEvent.wheel(ring(), { deltaY: 1 });
+    expect(ring()).toHaveAccessibleName(/週間 \/ Codex/);
+    await user.click(ring());
+    expect(ring()).toHaveAccessibleName(/5時間 \/ Codex/);
+  });
 
-    const minimalBtn = await screen.findByRole("button", { name: "ミニマル化" });
-    await user.click(minimalBtn);
+  it("shows unavailable weekly quota as unknown instead of using the five-hour value", async () => {
+    mockLimits({ ...liveLimits, claude: { ...liveLimits.claude, weekly: null } });
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(ring());
+    expect(screen.getByRole("img", { name: /週間枠：Claude Code 未取得、Codex 80%/ })).toBeInTheDocument();
+    const rail = screen.getByRole("region", { name: "Claude Code 状況" });
+    expect(within(rail).getAllByText("—")).toHaveLength(2);
+  });
 
+  it("replaces the old input screen with retrieval sources, timestamps and reset details", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "取得状況" }));
+    expect(await screen.findByRole("heading", { name: "取得状況" })).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("保存")).toBeNull();
+    expect(screen.getByText("Codex app-server")).toBeInTheDocument();
+    expect(screen.getByText("OpenUsage")).toBeInTheDocument();
+    expect(screen.getAllByText("2026-09-28 09:00")).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "再取得" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "取得状況を閉じる" }));
+    expect(ring()).toBeInTheDocument();
+  });
+
+  it("reports expired authentication and preserves the other service's quotas", async () => {
+    mockLimits({ ...liveLimits, claude: {
+      ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+      errorCode: "auth_expired", message: "Claude Code の認証期限が切れています。/login 後に再読み込みしてください。",
+    } });
+    const user = userEvent.setup(); render(<App />);
+    expect(await screen.findByText("要認証")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Claude Code 未取得、Codex 85%/ })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claude Code 残量取得の詳細" }));
+    expect(screen.getByRole("status")).toHaveTextContent("/login 後に再読み込み");
+    await user.click(screen.getByRole("button", { name: "取得状況" }));
+    expect(screen.getByRole("status")).toHaveTextContent("/login 後に再読み込み");
+  });
+
+  it("reports command failure instead of remaining in fetching state", async () => {
+    invokeMock.mockRejectedValue(new Error("backend unavailable")); render(<App />);
+    expect(await screen.findAllByText("取得失敗")).toHaveLength(2);
+    expect(screen.queryByText("取得中")).toBeNull();
+  });
+
+  it("supports scope switching in minimal mode and preserves it after restoring", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(true);
-      expect(setSizeMock).toHaveBeenCalledWith(
-        expect.objectContaining({ width: 200, height: 200 }),
-      );
+      expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 200, height: 200 }));
     });
-
-    expect(screen.queryByRole("button", { name: "ミニマル化" })).toBeNull();
     expect(screen.queryByText("Codex")).toBeNull();
-
-    const exitBtn = await screen.findByRole("button", { name: "通常モードに戻す" });
-    await user.click(exitBtn);
-
+    await user.click(ring());
+    expect(ring()).toHaveAccessibleName(/週間/);
+    await user.click(screen.getByRole("button", { name: "通常モードに戻す" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(false);
-      expect(setSizeMock).toHaveBeenCalledWith(
-        expect.objectContaining({ width: 400, height: 380 }),
-      );
+      expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 400, height: 380 }));
     });
-
-    expect(await screen.findByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
-  });
-
-  it("saves manual remaining percent for Claude 5h sessions", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(await screen.findByRole("button", { name: "設定" }));
-    const input = await screen.findByRole("spinbutton", { name: "Claude 5h 残り%" });
-    expect(screen.queryByLabelText("Mana 残量")).toBeNull();
-    expect(screen.queryByText("Claude Code")).toBeNull();
-    await user.clear(input);
-    await user.type(input, "42");
-    const editor = input.closest("section");
-    expect(editor).not.toBeNull();
-    await user.click(within(editor as HTMLElement).getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith(
-        "save_manual_limit_entry",
-        expect.objectContaining({
-          input: expect.objectContaining({
-            tool: "claude_code",
-            scope: "session_5h",
-            remainingLabel: "42%",
-            remainingPercent: 42,
-          }),
-        }),
-      );
-    });
-  });
-
-  it("shows Codex 5h and weekly manual editors in settings mode", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await user.click(await screen.findByRole("button", { name: "設定" }));
-
-    expect(await screen.findByRole("spinbutton", { name: "Codex 5h 残り%" })).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: "Codex Week 残り%" })).toBeInTheDocument();
-  });
-
-  it("switches the mana ring target with the mouse wheel", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    const ringButton = await screen.findByRole("button", { name: /表示対象切替/ });
-    expect(ringButton).toHaveAccessibleName(/Claude Pro/);
-
-    fireEvent.wheel(ringButton, { deltaY: 1 });
-
-    expect(await screen.findByRole("button", { name: /Codex/ })).toBeInTheDocument();
+    expect(ring()).toHaveAccessibleName(/週間/);
   });
 });

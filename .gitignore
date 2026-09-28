@@ -3,6 +3,7 @@ dist
 .claude/
 src-tauri/target
 src-tauri/gen
+src-tauri/binaries/openusage.exe
 *.db
 *.db-shm
 *.db-wal
