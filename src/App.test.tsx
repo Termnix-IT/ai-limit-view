@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const setSizeMock = vi.fn();
 const setAlwaysOnTopMock = vi.fn();
+const setShadowMock = vi.fn();
 vi.mock("@tauri-apps/api/window", () => ({
   LogicalSize: class {
     constructor(public width: number, public height: number) {}
@@ -19,6 +20,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     startDragging: vi.fn(), toggleMaximize: vi.fn(), minimize: vi.fn(), close: vi.fn(),
     setSize: (size: { width: number; height: number }) => setSizeMock(size),
     setAlwaysOnTop: (flag: boolean) => setAlwaysOnTopMock(flag),
+    setShadow: (flag: boolean) => setShadowMock(flag),
   }),
 }));
 
@@ -48,9 +50,13 @@ function ring() {
   return screen.getByRole("button", { name: /残量枠切替/ });
 }
 
+function serviceButton(label: "Codex" | "Claude Code") {
+  return screen.getByRole("button", { name: `${label}を外側に表示` });
+}
+
 describe("App", () => {
   beforeEach(() => {
-    invokeMock.mockReset(); setSizeMock.mockReset(); setAlwaysOnTopMock.mockReset();
+    invokeMock.mockReset(); setSizeMock.mockReset(); setAlwaysOnTopMock.mockReset(); setShadowMock.mockReset();
     mockLimits();
   });
 
@@ -59,7 +65,8 @@ describe("App", () => {
     expect(await screen.findByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
     expect(ring()).toHaveTextContent("94%");
     expect(ring()).not.toHaveTextContent("85%");
-    expect(within(ring()).getByRole("img", { name: "Claude Code" })).toBeInTheDocument();
+    expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "false");
+    expect(serviceButton("Claude Code")).toHaveAttribute("aria-pressed", "true");
     expect(within(ring()).queryByText(/Codex|Claude Code/)).toBeNull();
     expect(screen.getAllByText("5h残")).toHaveLength(2);
     expect(screen.getAllByText("週残")).toHaveLength(2);
@@ -101,12 +108,53 @@ describe("App", () => {
     expect(ring()).toHaveAccessibleName(/週間 \/ Codex/);
     await waitFor(() => expect(ring()).toHaveTextContent("80%"));
     expect(ring()).not.toHaveTextContent("68%");
-    expect(within(ring()).getByRole("img", { name: "Codex" })).toBeInTheDocument();
-    expect(within(ring()).queryByRole("img", { name: "Claude Code" })).toBeNull();
+    expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "true");
+    expect(serviceButton("Claude Code")).toHaveAttribute("aria-pressed", "false");
     expect(within(ring()).queryByText(/Codex|Claude Code/)).toBeNull();
     await user.click(ring());
     expect(ring()).toHaveAccessibleName(/5時間 \/ Codex/);
     expect(ring()).toHaveTextContent("85%");
+  });
+
+  it("selects the outer ring and central percentage by clicking either service icon", async () => {
+    const user = userEvent.setup(); render(<App />);
+    const image = await screen.findByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ });
+    await user.click(serviceButton("Codex"));
+    expect(ring()).toHaveTextContent("85%");
+    expect(image).toHaveAccessibleName(/外側 Codex/);
+    expect(image.querySelector('circle[r="86"][stroke="url(#codexGrad)"]')).not.toBeNull();
+    expect(image.querySelector('circle[r="70"][stroke="url(#claudeGrad)"]')).not.toBeNull();
+    await user.click(serviceButton("Claude Code"));
+    expect(ring()).toHaveTextContent("94%");
+    expect(image.querySelector('circle[r="86"][stroke="url(#claudeGrad)"]')).not.toBeNull();
+    expect(image.querySelector('circle[r="70"][stroke="url(#codexGrad)"]')).not.toBeNull();
+    await user.click(serviceButton("Claude Code"));
+    expect(ring()).toHaveAccessibleName(/5時間 \/ Claude Code/);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps weekly scope when selecting a service and supports the scope button", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(screen.getByRole("button", { name: "5時間枠" }));
+    await user.click(serviceButton("Codex"));
+    expect(ring()).toHaveAccessibleName(/週間 \/ Codex/);
+    expect(ring()).toHaveTextContent("80%");
+    await user.click(serviceButton("Claude Code"));
+    expect(ring()).toHaveTextContent("68%");
+    await user.click(screen.getByRole("button", { name: "週間枠" }));
+    expect(ring()).toHaveTextContent("94%");
+  });
+
+  it("supports service selection using the keyboard", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(serviceButton("Codex"));
+    await user.tab();
+    expect(serviceButton("Claude Code")).toHaveFocus();
+    await user.keyboard(" ");
+    expect(serviceButton("Claude Code")).toHaveAttribute("aria-pressed", "true");
+    expect(ring()).toHaveTextContent("94%");
   });
 
   it("shows unavailable weekly quota as unknown instead of using the five-hour value", async () => {
@@ -225,16 +273,34 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "ミニマル化" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(true);
+      expect(setShadowMock).toHaveBeenCalledWith(false);
       expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 200, height: 200 }));
     });
     expect(screen.queryByText("Codex")).toBeNull();
+    expect(serviceButton("Claude Code")).toBeInTheDocument();
+    await user.click(serviceButton("Codex"));
+    expect(ring()).toHaveTextContent("85%");
     await user.click(ring());
     expect(ring()).toHaveAccessibleName(/週間/);
+    expect(ring()).toHaveTextContent("80%");
     await user.click(screen.getByRole("button", { name: "通常モードに戻す" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(false);
+      expect(setShadowMock.mock.calls).toEqual([[false], [true]]);
       expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 400, height: 380 }));
+      expect(setShadowMock.mock.invocationCallOrder[1]).toBeLessThan(setSizeMock.mock.invocationCallOrder[1]);
     });
     expect(ring()).toHaveAccessibleName(/週間/);
+    expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps normal controls available if the native shadow change fails", async () => {
+    setShadowMock.mockRejectedValueOnce(new Error("Native shadow update failed"));
+    const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
+    expect(await screen.findByText("Error: Native shadow update failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "通常モードに戻す" })).toBeNull();
+    expect(setSizeMock).not.toHaveBeenCalled();
   });
 });

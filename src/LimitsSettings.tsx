@@ -22,7 +22,7 @@ export function LimitsSettings({ limits, refreshing, onRefresh }: {
       </header>
       <ProviderDetails label="Codex" variant="codex" provider={limits?.codex ?? null} />
       <ProviderDetails label="Claude Code" variant="claude" provider={limits?.claude ?? null} />
-      <p className="limitsSettings__hint">リングをクリック：5時間枠 ↔ 週間枠<br />ホイール：Codex ↔ Claude Code</p>
+      <p className="limitsSettings__hint">数値・枠をクリック：5時間枠 ↔ 週間枠<br />アイコン・ホイール：外側リングと中央残量のサービスを選択</p>
     </div>
   );
 }

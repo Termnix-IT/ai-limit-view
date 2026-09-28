@@ -13,5 +13,5 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![live_limits::get_provider_limits])
         .run(tauri::generate_context!())
-        .expect("failed to run AI LimitUsage Watcher");
+        .expect("failed to run LimitView");
 }

@@ -35,7 +35,7 @@ export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, synced
     >
       <div className="titlebar__brand">
         <img className="titlebar__icon" src={appIcon} width={16} height={16} alt="" draggable={false} />
-        <span>MANA STATUS</span>
+        <span>LimitView</span>
         {syncedAt ? <span className="titlebar__sync">· {syncedAt}</span> : null}
       </div>
 

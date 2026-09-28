@@ -67,6 +67,7 @@ export function App() {
   const enterMinimal = useCallback(async () => {
     try {
       const win = getCurrentWindow();
+      await win.setShadow(false);
       await win.setSize(new LogicalSize(MINIMAL_SIZE[0], MINIMAL_SIZE[1]));
       await win.setAlwaysOnTop(true);
       setSettingsOpen(false);
@@ -81,6 +82,8 @@ export function App() {
     try {
       const win = getCurrentWindow();
       await win.setAlwaysOnTop(false);
+      // Windows changes the client area when shadow is restored; resize afterward.
+      await win.setShadow(true);
       await win.setSize(new LogicalSize(NORMAL_SIZE[0], NORMAL_SIZE[1]));
       setMinimal(false);
       setError(null);

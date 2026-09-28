@@ -159,15 +159,14 @@ h1, h2 { margin: 0; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 3px;
   padding: 0;
-  border: 0;
-  border-radius: 50%;
   color: var(--ink);
   background: transparent;
   text-align: center;
   white-space: nowrap;
 }
+.manaRing__readout { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; }
 .manaRing__title { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 600; letter-spacing: 0.25em; color: #bfd3ef; }
 .manaRing__value {
   color: var(--service-color);
@@ -179,8 +178,12 @@ h1, h2 { margin: 0; }
   text-shadow: 0 0 16px var(--service-glow);
 }
 .manaRing__value > span { font-size: 0.68em; letter-spacing: -0.04em; margin-left: 1px; }
-.manaRing__service { display: inline-flex; align-items: center; justify-content: center; }
-.manaRing__service > svg { width: 18px; height: 18px; }
+.manaRing__services { display: flex; align-items: center; gap: 4px; }
+.manaRing__serviceButton { display: grid; place-items: center; width: 24px; height: 24px; padding: 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; }
+.manaRing__serviceButton .serviceMark { width: 17px; height: 17px; filter: none; }
+.manaRing__serviceButton:hover { background: var(--service-soft); }
+.manaRing__serviceButton[aria-pressed="true"] { border-color: var(--service-color); background: var(--service-soft); }
+.manaRing__serviceButton:focus-visible { outline-color: var(--service-color); outline-offset: 1px; }
 .manaRing__scope {
   display: inline-flex;
   align-items: center;
@@ -195,9 +198,9 @@ h1, h2 { margin: 0; }
   line-height: 1.2;
   transition: border-color 140ms ease, background-color 140ms ease;
 }
-.manaRing__center:hover .manaRing__scope { border-color: var(--service-color); background: var(--service-soft); }
+.manaRing__scope:hover { border-color: var(--service-color); background: var(--service-soft); }
 .manaRing__center[data-unknown="true"] .manaRing__value { color: var(--ink-dim); text-shadow: none; }
-.manaRing__center:focus-visible { outline-color: var(--service-color); outline-offset: 3px; }
+.manaRing__readout:focus-visible, .manaRing__scope:focus-visible { outline-color: var(--service-color); outline-offset: 2px; }
 
 /* Provider data uses shared separators instead of nested cards. */
 .chipGrid {
@@ -281,9 +284,8 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .manaRing--minimal { width: 180px; }
 .manaRing--minimal .manaRing__arc { filter: none; }
 .manaRing--minimal .manaRing__title { display: none; }
-.manaRing--minimal .manaRing__center { gap: 4px; }
+.manaRing--minimal .manaRing__center { gap: 3px; }
 .manaRing--minimal .manaRing__value { font-size: 33px; }
-.manaRing--minimal .manaRing__service > svg { width: 16px; height: 16px; }
 .manaRing--minimal .manaRing__scope { font-size: 8px; padding: 2px 6px; }
 .manaRing__exitMinimal { position: absolute; top: 0; right: 0; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 50%; color: var(--ink-mute); background: rgba(9, 15, 27, 0.85); }
 .manaRing__exitMinimal:hover { border-color: var(--codex-2); color: var(--ink); }
@@ -291,9 +293,8 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 @keyframes quota-spin { to { transform: rotate(360deg); } }
 @media (max-height: 350px) {
   .manaRing:not(.manaRing--minimal) .manaRing__center { gap: 3px; }
-  .manaRing:not(.manaRing--minimal) .manaRing__title { font-size: 8px; }
+  .manaRing:not(.manaRing--minimal) .manaRing__title { display: none; }
   .manaRing:not(.manaRing--minimal) .manaRing__value { font-size: 33px; }
-  .manaRing:not(.manaRing--minimal) .manaRing__service > svg { width: 14px; height: 14px; }
   .manaRing:not(.manaRing--minimal) .manaRing__scope { font-size: 8px; padding: 2px 6px; }
 }
 @media (prefers-reduced-motion: reduce) {

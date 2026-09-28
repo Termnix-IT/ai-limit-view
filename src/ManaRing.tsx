@@ -31,7 +31,7 @@ export function ManaRing({
     if ((event.target as HTMLElement).closest("button")) return;
     void getCurrentWindow().startDragging();
   };
-  const handleWheel = (event: WheelEvent<HTMLButtonElement>) => {
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault();
     if (event.deltaY !== 0) onSwitchTool(activeTool === "codex" ? "claude_code" : "codex");
   };
@@ -40,7 +40,7 @@ export function ManaRing({
     <div className={`manaRing ${variant}${minimal ? " manaRing--minimal" : ""}`}
       aria-label={`Mana ${scopeLabel}枠の残量`} onMouseDown={handleRimDrag}>
       <svg viewBox="0 0 200 200" role="img"
-        aria-label={`${scopeLabel}枠：Claude Code ${percentageLabel(claudeRemainingPercent)}、Codex ${percentageLabel(codexRemainingPercent)}`}>
+        aria-label={`${scopeLabel}枠：Claude Code ${percentageLabel(claudeRemainingPercent)}、Codex ${percentageLabel(codexRemainingPercent)}、外側 ${activeLabel}`}>
         <defs>
           <linearGradient id="claudeGrad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="var(--claude-1)" />
@@ -68,27 +68,43 @@ export function ManaRing({
             <path key={index} d={index % 6 === 0 ? "M100 0v5" : "M100 1v2"}
               transform={`rotate(${index * 15} 100 100)`} stroke="var(--codex-2)" strokeWidth="0.6" opacity="0.5" />
           ))}
-          <circle cx="100" cy="100" r="60" fill="url(#manaCore)" stroke="var(--service-soft)" strokeWidth="0.7" />
+          <circle cx="100" cy="100" r="60" fill={minimal ? "none" : "url(#manaCore)"} stroke="var(--service-soft)" strokeWidth="0.7" />
           <path d="M37 100h5m116 0h5" stroke="var(--service-color)" strokeWidth="0.8" />
         </g>
         <g transform="rotate(-90 100 100)">
-          <QuotaArc variant="claude" radius={86} width={12} remaining={claudeRemainingPercent} />
-          <QuotaArc variant="codex" radius={70} width={9} remaining={codexRemainingPercent} />
+          <QuotaArc variant="claude" radius={activeTool === "claude_code" ? 86 : 70}
+            width={activeTool === "claude_code" ? 12 : 9} remaining={claudeRemainingPercent} />
+          <QuotaArc variant="codex" radius={activeTool === "codex" ? 86 : 70}
+            width={activeTool === "codex" ? 12 : 9} remaining={codexRemainingPercent} />
         </g>
       </svg>
-      <button type="button" className="manaRing__center" data-unknown={activePercent === null}
-        onClick={onToggleScope} onWheel={handleWheel}
-        aria-label={`残量枠切替 (現在 ${scopeLabel} / ${activeLabel})`}
-        title="クリックで5時間枠 / 週間枠切替 · ホイールで Codex / Claude Code 切替">
-        <span className="manaRing__title"><Sparkles size={12} aria-hidden="true" />MANA</span>
-        <strong className="manaRing__value">
-          {activePercent === null ? "—" : <>{Math.round(clamp(activePercent))}<span>%</span></>}
-        </strong>
-        <span className="manaRing__service" role="img" aria-label={activeLabel} title={activeLabel}>
-          <ServiceMark variant={variant} />
-        </span>
-        <span className="manaRing__scope"><Clock3 size={10} aria-hidden="true" />{scopeLabel}枠</span>
-      </button>
+      <div className="manaRing__center" data-unknown={activePercent === null} onWheel={handleWheel}>
+        <button type="button" className="manaRing__readout" onClick={onToggleScope}
+          aria-label={`残量枠切替 (現在 ${scopeLabel} / ${activeLabel})`}
+          title="クリックで5時間枠 / 週間枠切替 · ホイールでサービス切替">
+          <span className="manaRing__title"><Sparkles size={12} aria-hidden="true" />MANA</span>
+          <strong className="manaRing__value">
+            {activePercent === null ? "—" : <>{Math.round(clamp(activePercent))}<span>%</span></>}
+          </strong>
+        </button>
+        <div className="manaRing__services" role="group" aria-label="外側リングのサービス">
+          {(["codex", "claude_code"] as const).map((tool) => {
+            const label = tool === "codex" ? "Codex" : "Claude Code";
+            const serviceVariant = tool === "codex" ? "codex" : "claude";
+            return (
+              <button key={tool} type="button" className={`manaRing__serviceButton ${serviceVariant}`}
+                aria-label={`${label}を外側に表示`} aria-pressed={activeTool === tool}
+                title={`${label}のリングと残量を選択`} onClick={() => onSwitchTool(tool)}>
+                <ServiceMark variant={serviceVariant} />
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" className="manaRing__scope" onClick={onToggleScope}
+          title="クリックで5時間枠 / 週間枠切替">
+          <Clock3 size={10} aria-hidden="true" />{scopeLabel}枠
+        </button>
+      </div>
       {minimal && onExitMinimal ? (
         <button type="button" className="manaRing__exitMinimal" onClick={onExitMinimal}
           aria-label="通常モードに戻す" title="通常モードに戻す">
