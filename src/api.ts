@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LiveLimits } from "./types";
+import type { LimitProvider, LiveProviderLimits } from "./types";
 
 export const api = {
-  getLiveLimits() {
-    return invoke<LiveLimits>("get_live_limits");
+  getProviderLimits(provider: LimitProvider) {
+    return invoke<LiveProviderLimits>("get_provider_limits", { provider });
   },
 };

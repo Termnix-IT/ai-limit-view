@@ -11,7 +11,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![live_limits::get_live_limits])
+        .invoke_handler(tauri::generate_handler![live_limits::get_provider_limits])
         .run(tauri::generate_context!())
         .expect("failed to run AI LimitUsage Watcher");
 }

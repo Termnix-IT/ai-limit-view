@@ -16,7 +16,9 @@ Codex と Claude Code のサブスクリプション利用枠を自動取得し�
 
 ## Usage Model
 
-Codex はインストール済みの `codex.exe app-server` の `account/rateLimits/read`、Claude Code はアプリに同梱した OpenUsage の `export --output - --source direct` から利用枠を読みます。Codex CLI は `%LOCALAPPDATA%\OpenAI\Codex\bin` 配下の新しい実行ファイルを優先し、見つからない場合は PATH を探索します。スタートメニューから起動した場合も、Codex デスクトップ版の CLI を検出します。両方ともログイン済みである必要があります。取得結果は60秒ごとに更新されます。
+Codex はインストール済みの `codex.exe app-server` の `account/rateLimits/read`、Claude Code はアプリに同梱した OpenUsage の `export --output - --source direct` から利用枠を読みます。Codex CLI は `%LOCALAPPDATA%\OpenAI\Codex\bin` 配下の新しい実行ファイルを優先し、見つからない場合は PATH と `%APPDATA%\npm` を探索します。npm版はパッケージ内のネイティブ実行ファイルを使用します。スタートメニューから起動した場合も、Codex デスクトップ版の CLI を検出します。両方ともログイン済みである必要があります。
+
+取得結果はサービス別に60秒ごとに更新し、取得が終わった方から表示します。Codex は25秒、OpenUsage は60秒で、通信・出力読み取りを含めてタイムアウトします。取得中にアプリを終了した場合も、起動した取得用プロセスとその子孫を停止します。
 
 各枠は取得した使用率を `100 - 使用率` に変換して表示します。取得できない枠は `—` です。リングは初期状態で5時間枠を表示し、クリックで両サービスを同時に週間枠へ切り替えます。各サービスのチップには常に両枠の残量を表示し、選択中の枠を強調します。回復までの時間はサービスが返すリセット時刻から計算し、時刻がない場合は `—`、時刻を過ぎた場合は `更新待ち` と表示します。
 
@@ -42,6 +44,8 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 - ログイン済みの Codex CLI と Claude Code
 
 OpenUsage 0.25.0 は `npm run tauri dev` / `npm run tauri build` の前にビルド用スクリプトが用意し、アプリへ同梱します。LLMDashboard の起動は不要です。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
+
+LLMDashboard に同じチェックサムの OpenUsage がある場合はビルド時に再利用します。別バージョンの場合は固定バージョンをダウンロードし、アーカイブと実行ファイルのチェックサムを検証します。既に同梱用の配置先にあるファイルのチェックサムが不一致の場合は、ビルドを停止します。
 
 ## Development
 
@@ -88,6 +92,12 @@ Rust テストを実行します。
 ```powershell
 cd src-tauri
 cargo test
+```
+
+OpenUsage のビルド準備処理を、通信を使わずに検証します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-prepare-openusage.ps1
 ```
 
 ## Data Storage

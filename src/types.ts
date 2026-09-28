@@ -1,4 +1,5 @@
 export type ToolKind = "codex" | "claude_code";
+export type LimitProvider = ToolKind;
 export type LimitScope = "fiveHour" | "weekly";
 
 export interface LiveLimitWindow {
@@ -18,6 +19,6 @@ export interface LiveProviderLimits {
 }
 
 export interface LiveLimits {
-  codex: LiveProviderLimits;
-  claude: LiveProviderLimits;
+  codex: LiveProviderLimits | null;
+  claude: LiveProviderLimits | null;
 }

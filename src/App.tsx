@@ -5,14 +5,14 @@ import { LimitsSettings } from "./LimitsSettings";
 import { ManaRing } from "./ManaRing";
 import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
-import type { LimitScope, LiveLimits, ToolKind } from "./types";
+import type { LimitProvider, LimitScope, LiveLimits, ToolKind } from "./types";
 
 const NORMAL_SIZE: [number, number] = [400, 380];
 const MINIMAL_SIZE: [number, number] = [200, 200];
 
 export function App() {
-  const [liveLimits, setLiveLimits] = useState<LiveLimits | null>(null);
-  const liveRefreshRunning = useRef(false);
+  const [liveLimits, setLiveLimits] = useState<LiveLimits>({ codex: null, claude: null });
+  const liveRefreshRunning = useRef({ codex: false, claude_code: false });
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
@@ -21,12 +21,14 @@ export function App() {
   const [activeRingTool, setActiveRingTool] = useState<ToolKind>("claude_code");
   const [scope, setScope] = useState<LimitScope>("fiveHour");
 
-  const refreshLiveLimits = useCallback(async () => {
-    if (liveRefreshRunning.current) return;
-    liveRefreshRunning.current = true;
+  const refreshProvider = useCallback(async (provider: LimitProvider) => {
+    if (liveRefreshRunning.current[provider]) return;
+    liveRefreshRunning.current[provider] = true;
     setRefreshing(true);
+    const key = provider === "codex" ? "codex" : "claude";
     try {
-      setLiveLimits(await api.getLiveLimits());
+      const result = await api.getProviderLimits(provider);
+      setLiveLimits((current) => ({ ...current, [key]: result }));
     } catch {
       const failedProvider = {
         status: "unavailable" as const,
@@ -36,15 +38,20 @@ export function App() {
         message: "残量の取得処理に失敗しました。再読み込みしてください。",
         errorCode: "fetch_failed",
       };
-      setLiveLimits({
-        codex: { ...failedProvider, source: "Codex app-server" },
-        claude: { ...failedProvider, source: "OpenUsage" },
-      });
+      setLiveLimits((current) => ({
+        ...current,
+        [key]: { ...failedProvider, source: provider === "codex" ? "Codex app-server" : "OpenUsage" },
+      }));
     } finally {
-      liveRefreshRunning.current = false;
-      setRefreshing(false);
+      liveRefreshRunning.current[provider] = false;
+      setRefreshing(Object.values(liveRefreshRunning.current).some(Boolean));
     }
   }, []);
+
+  const refreshLiveLimits = useCallback(() => {
+    void refreshProvider("codex");
+    void refreshProvider("claude_code");
+  }, [refreshProvider]);
 
   useEffect(() => {
     void refreshLiveLimits();
@@ -82,8 +89,10 @@ export function App() {
     }
   }, []);
 
-  const syncedAt = liveLimits
-    ? new Date(liveLimits.codex.checkedAt).toLocaleTimeString("ja-JP", {
+  const lastCheckedAt = [liveLimits.codex?.checkedAt, liveLimits.claude?.checkedAt]
+    .filter((value): value is string => Boolean(value)).sort().slice(-1)[0];
+  const syncedAt = lastCheckedAt
+    ? new Date(lastCheckedAt).toLocaleTimeString("ja-JP", {
         timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit",
       })
     : null;
@@ -108,8 +117,8 @@ export function App() {
           <>
             <div className="manaPanel">
               <ManaRing
-                codexRemainingPercent={liveLimits?.codex[scope]?.remainingPercent ?? null}
-                claudeRemainingPercent={liveLimits?.claude[scope]?.remainingPercent ?? null}
+                codexRemainingPercent={liveLimits.codex?.[scope]?.remainingPercent ?? null}
+                claudeRemainingPercent={liveLimits.claude?.[scope]?.remainingPercent ?? null}
                 activeTool={activeRingTool}
                 scope={scope}
                 onToggleScope={() => setScope((current) => current === "fiveHour" ? "weekly" : "fiveHour")}

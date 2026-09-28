@@ -16,6 +16,7 @@
 - `npm run tauri dev`: run the Tauri desktop app in development mode.
 - `npm run tauri build`: build the Tauri app; the configured bundle target is `nsis`.
 - `cargo test`: run Rust tests from `src-tauri/`.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-prepare-openusage.ps1`: verify OpenUsage preparation with isolated fixtures and no network.
 
 ## Repository Structure
 - `src/`: React frontend code, TypeScript types, API wrapper around Tauri commands, styles, and frontend tests.
@@ -31,13 +32,15 @@
 - `src-tauri/`: Rust Tauri app and bundle config.
 - `src-tauri/src/lib.rs`: minimal desktop setup and command registration.
 - `src-tauri/src/live_limits.rs`: provider discovery, quota retrieval, safe diagnostics, and Rust tests.
-- `src-tauri/src/process.rs`: hidden child process creation for Codex and OpenUsage.
+- `src-tauri/src/process.rs`: hidden child process creation and Windows Job Object lifetime management via process-wrap for Codex and OpenUsage.
 - `src-tauri/tauri.conf.json`: desktop window, dev server, build, and bundle settings; note `decorations: false` and `transparent: true`.
 
 ## Coding Conventions
 - Keep TypeScript strict and avoid `any`; update `src/types.ts` when changing serialized command payloads or responses.
 - Tauri command payloads use `camelCase` across the frontend boundary via Serde; Rust internal fields are `snake_case`.
-- Keep `LiveLimits`, `LiveProviderLimits`, and `LiveLimitWindow` in TypeScript aligned with Rust serialization. UI scope keys are `fiveHour` and `weekly`.
+- Keep `LiveProviderLimits` and `LiveLimitWindow` in TypeScript aligned with Rust serialization. `LiveLimits` is frontend state with nullable providers during first retrieval. UI scope keys are `fiveHour` and `weekly`.
+- `get_provider_limits` accepts `codex` or `claude_code` and returns one provider. Keep polling guards independent and apply each result immediately.
+- Keep process-wrap's `KillOnDrop`, `CreationFlags(CREATE_NO_WINDOW)`, and `JobObject` together. Do not unwrap the child or bypass its job ownership. Bound all pipe I/O with the provider deadline.
 - When adding or renaming a Tauri command, update all three places: Rust command function, `tauri::generate_handler!`, and `src/api.ts`.
 - Do not reintroduce manual quotas or local token/time estimates as subscription quota data. Missing provider windows display `—`.
 - Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA dashboard style, circular ring hierarchy, blue Codex/orange Claude color roles, and dense chip layout.
@@ -54,7 +57,8 @@
 - For Rust backend or quota retrieval changes, run `cargo test` from `src-tauri/`.
 - For full desktop integration changes, run `npm run tauri dev` and verify the transparent undecorated window, titlebar drag/buttons, ring animation, and minimal-mode enter/exit manually.
 - Keep tests focused on scope switching, live quota rendering, missing data, retrieval details, reset formatting, and window API calls; verify provider parsing and executable discovery in Rust tests.
-- The ignored live quota test requires authenticated providers and network access; run it alone with `--test-threads=1`.
+- The ignored live quota test requires authenticated providers and network access; run `cargo test live_quotas_without_codex_in_path -- --ignored --test-threads=1`. Tests named `descendant_fixture` and `pipe_holder_fixture` are subprocess helpers, not standalone validation.
+- To verify installed npm Codex compatibility, run `cargo test live_quotas_from_npm_native_cli -- --ignored --test-threads=1` with npm Codex installed and authenticated. Use `app-server --listen stdio://`; the shorter `--stdio` alias is not available in all CLI releases.
 
 ## Agent Workflow Notes
 - Check `git status --short` before editing and do not revert unrelated user changes.

@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { LiveLimits } from "./types";
+import type { LimitProvider, LiveLimits, LiveProviderLimits } from "./types";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/api/window", () => ({
   }),
 }));
 
-const liveLimits: LiveLimits = {
+const liveLimits: { codex: LiveProviderLimits; claude: LiveProviderLimits } = {
   codex: {
     status: "ok", source: "Codex app-server", checkedAt: "2026-09-28T00:00:00Z",
     fiveHour: { usedPercent: 15, remainingPercent: 85, resetsAt: 1790580000 },
@@ -37,9 +37,9 @@ const liveLimits: LiveLimits = {
   },
 };
 
-function mockLimits(limits = liveLimits) {
-  invokeMock.mockImplementation((command: string) => {
-    if (command === "get_live_limits") return Promise.resolve(limits);
+function mockLimits(limits: LiveLimits = liveLimits) {
+  invokeMock.mockImplementation((command: string, args: { provider: LimitProvider }) => {
+    if (command === "get_provider_limits") return Promise.resolve(args.provider === "codex" ? limits.codex : limits.claude);
     return Promise.reject(new Error(`Unexpected legacy command: ${command}`));
   });
 }
@@ -61,7 +61,10 @@ describe("App", () => {
     expect(screen.getAllByText("週残")).toHaveLength(2);
     expect(screen.getAllByText("取得済")).toHaveLength(2);
     expect(screen.queryByText(/Pro|Max 5x|Max 20x|稼働中|待機中|未記録/)).toBeNull();
-    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual(["get_live_limits"]);
+    expect(invokeMock.mock.calls).toEqual([
+      ["get_provider_limits", { provider: "codex" }],
+      ["get_provider_limits", { provider: "claude_code" }],
+    ]);
   });
 
   it("shows the ring and fetching state while quota retrieval is pending", () => {
@@ -81,7 +84,7 @@ describe("App", () => {
     await user.click(ring());
     expect(screen.getByRole("img", { name: /5時間枠：Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
     expect(screen.getAllByText("5h回復")).toHaveLength(2);
-    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
   it("switches the highlighted tool with the wheel while keeping the quota scope", async () => {
@@ -114,7 +117,7 @@ describe("App", () => {
     expect(screen.getByText("OpenUsage")).toBeInTheDocument();
     expect(screen.getAllByText("2026-09-28 09:00")).toHaveLength(2);
     await user.click(screen.getByRole("button", { name: "再取得" }));
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(4));
     await user.click(screen.getByRole("button", { name: "取得状況を閉じる" }));
     expect(ring()).toBeInTheDocument();
   });
@@ -137,6 +140,43 @@ describe("App", () => {
     invokeMock.mockRejectedValue(new Error("backend unavailable")); render(<App />);
     expect(await screen.findAllByText("取得失敗")).toHaveLength(2);
     expect(screen.queryByText("取得中")).toBeNull();
+  });
+
+  it.each(["codex", "claude_code"] as const)("displays %s immediately while the other service is pending", async (fast) => {
+    let resolveSlow!: (value: LiveProviderLimits) => void;
+    const pending = new Promise<LiveProviderLimits>((resolve) => { resolveSlow = resolve; });
+    invokeMock.mockImplementation((_command: string, { provider }: { provider: LimitProvider }) =>
+      provider === fast ? Promise.resolve(fast === "codex" ? liveLimits.codex : liveLimits.claude) : pending);
+    render(<App />);
+    const expected = fast === "codex" ? /Claude Code 未取得、Codex 85%/ : /Claude Code 94%、Codex 未取得/;
+    expect(await screen.findByRole("img", { name: expected })).toBeInTheDocument();
+    expect(screen.getAllByText("取得中")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "再読み込み" })).toBeDisabled();
+    await act(async () => { resolveSlow(fast === "codex" ? liveLimits.claude : liveLimits.codex); });
+    expect(screen.getByRole("img", { name: /Claude Code 94%、Codex 85%/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "再読み込み" })).toBeEnabled();
+  });
+
+  it("preserves Codex when the Claude command rejects", async () => {
+    invokeMock.mockImplementation((_command: string, { provider }: { provider: LimitProvider }) =>
+      provider === "codex" ? Promise.resolve(liveLimits.codex) : Promise.reject(new Error("unavailable")));
+    render(<App />);
+    expect(await screen.findByRole("img", { name: /Claude Code 未取得、Codex 85%/ })).toBeInTheDocument();
+    expect(screen.getAllByText("取得失敗")).toHaveLength(1);
+  });
+
+  it("continues polling the ready service without duplicating an unfinished request", async () => {
+    vi.useFakeTimers();
+    try {
+      invokeMock.mockImplementation((_command: string, { provider }: { provider: LimitProvider }) =>
+        provider === "codex" ? Promise.resolve(liveLimits.codex) : new Promise(() => {}));
+      const view = render(<App />);
+      await act(async () => {});
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "codex")).toHaveLength(2);
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "claude_code")).toHaveLength(1);
+      view.unmount();
+    } finally { vi.useRealTimers(); }
   });
 
   it("supports scope switching in minimal mode and preserves it after restoring", async () => {

@@ -22,10 +22,7 @@ if (Test-Path $destination) {
     throw 'Bundled OpenUsage binary has an unexpected checksum.'
 }
 
-if (Test-Path $local) {
-    if ((Get-Sha256 $local) -ne $binaryHash) {
-        throw 'Installed OpenUsage binary has an unexpected checksum.'
-    }
+if ((Test-Path $local) -and ((Get-Sha256 $local) -eq $binaryHash)) {
     Copy-Item -LiteralPath $local -Destination $destination
     exit 0
 }
