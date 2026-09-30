@@ -1,6 +1,6 @@
 [package]
 name = "ai-limitusage-watcher"
-version = "0.1.10"
+version = "0.1.11"
 description = "Local usage visibility app for Codex and Claude Code"
 authors = ["LimitView"]
 edition = "2021"
