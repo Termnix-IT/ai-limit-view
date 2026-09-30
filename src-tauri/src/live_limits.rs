@@ -316,14 +316,27 @@ async fn claude_limits(path: &Path) -> WindowsResult {
 
 fn parse_claude(output: &[u8]) -> WindowsResult {
     let payload: Value = serde_json::from_slice(output).map_err(|_| LimitError::ClaudeData)?;
-    let snapshot = payload
+    let snapshots = payload
         .get("snapshots")
         .and_then(Value::as_array)
-        .and_then(|rows| {
-            rows.iter()
-                .find(|row| row.get("provider_id").and_then(Value::as_str) == Some("claude_code"))
-        })
         .ok_or(LimitError::ClaudeData)?;
+    let mut first_error = None;
+    for snapshot in snapshots
+        .iter()
+        .filter(|row| row.get("provider_id").and_then(Value::as_str) == Some("claude_code"))
+    {
+        match parse_claude_snapshot(snapshot) {
+            // Select one account's windows together; never combine different accounts.
+            Ok(limits) => return Ok(limits),
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    Err(first_error.unwrap_or(LimitError::ClaudeData))
+}
+
+fn parse_claude_snapshot(snapshot: &Value) -> WindowsResult {
     let metric = |name: &str| {
         window(
             snapshot
@@ -440,6 +453,104 @@ mod tests {
         let (five, weekly) = parse_claude(payload.to_string().as_bytes()).unwrap();
         assert_eq!(five.unwrap().remaining_percent, 93.0);
         assert_eq!(weekly.unwrap().remaining_percent, 68.0);
+    }
+
+    #[test]
+    fn selects_first_valid_claude_snapshot_after_failed_or_invalid_accounts() {
+        for used in [0, 7, 100] {
+            let payload = json!({"snapshots": [
+                {"provider_id": "codex", "metrics": {"usage_five_hour": {"used": 50}}},
+                {"provider_id": "claude_code", "metrics": {},
+                 "diagnostics": {"usage_api_error": "no credentials"}},
+                {"provider_id": "claude_code", "metrics": {
+                    "usage_five_hour": {"used": 101}, "usage_seven_day": {"used": "invalid"}
+                }},
+                {"provider_id": "claude_code", "status": "OK", "metrics": {
+                    "burn_rate": {"used": 99}
+                }},
+                {"provider_id": "claude_code", "metrics": {
+                    "usage_five_hour": {"used": used}, "usage_seven_day": {"used": 32}
+                 }, "resets": {
+                    "usage_five_hour": "2026-09-27T04:50:00Z",
+                    "usage_seven_day": "2026-10-01T00:00:00Z"
+                }},
+                {"provider_id": "claude_code", "metrics": {
+                    "usage_five_hour": {"used": 15}, "usage_seven_day": {"used": 20}
+                }}
+            ]});
+            let (five, weekly) = parse_claude(payload.to_string().as_bytes()).unwrap();
+            let five = five.unwrap();
+            let weekly = weekly.unwrap();
+            assert_eq!(five.remaining_percent, (100 - used) as f64);
+            assert_eq!(weekly.remaining_percent, 68.0);
+            assert_eq!(five.resets_at, Some(json!("2026-09-27T04:50:00Z")));
+            assert_eq!(weekly.resets_at, Some(json!("2026-10-01T00:00:00Z")));
+        }
+    }
+
+    #[test]
+    fn keeps_first_valid_claude_accounts_windows_together() {
+        let payload = json!({"snapshots": [
+            {"provider_id": "claude_code", "metrics": {"usage_five_hour": {"used": 7}}},
+            {"provider_id": "claude_code", "metrics": {
+                "usage_five_hour": {"used": 15}, "usage_seven_day": {"used": 32}
+            }}
+        ]});
+        let (five, weekly) = parse_claude(payload.to_string().as_bytes()).unwrap();
+        assert_eq!(five.unwrap().remaining_percent, 93.0);
+        assert!(weekly.is_none());
+    }
+
+    #[test]
+    fn accepts_weekly_only_claude_snapshot_after_an_account_failure() {
+        let payload = json!({"snapshots": [
+            {"provider_id": "claude_code", "metrics": {},
+             "diagnostics": {"usage_api_error": "token expired"}},
+            {"provider_id": "claude_code", "metrics": {"usage_seven_day": {"used": 32}}},
+            {"provider_id": "claude_code", "metrics": {"usage_five_hour": {"used": 7}}}
+        ]});
+        let (five, weekly) = parse_claude(payload.to_string().as_bytes()).unwrap();
+        assert!(five.is_none());
+        assert_eq!(weekly.unwrap().remaining_percent, 68.0);
+    }
+
+    #[test]
+    fn preserves_first_claude_error_when_all_accounts_fail() {
+        for (diagnostic, expected) in [
+            ("token expired", LimitError::ClaudeAuthExpired),
+            ("no credentials", LimitError::ClaudeAuthRequired),
+            ("HTTP 429 private-account-data", LimitError::ClaudeApi),
+            ("", LimitError::ClaudeData),
+        ] {
+            let payload = json!({"snapshots": [
+                {"provider_id": "codex", "metrics": {"usage_five_hour": {"used": 7}}},
+                {"provider_id": "claude_code", "metrics": {},
+                 "diagnostics": {"usage_api_error": diagnostic}},
+                {"provider_id": "claude_code", "metrics": {},
+                 "diagnostics": {"usage_api_error": "different failure"}}
+            ]});
+            assert_eq!(
+                parse_claude(payload.to_string().as_bytes()).unwrap_err(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_exports_without_claude_snapshots() {
+        for payload in [
+            json!({}),
+            json!({"snapshots": null}),
+            json!({"snapshots": []}),
+            json!({"snapshots": [{"provider_id": "codex", "metrics": {
+                "usage_five_hour": {"used": 7}
+            }}]}),
+        ] {
+            assert_eq!(
+                parse_claude(payload.to_string().as_bytes()).unwrap_err(),
+                LimitError::ClaudeData
+            );
+        }
     }
 
     #[test]
