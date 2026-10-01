@@ -1,16 +1,16 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { useState } from "react";
 import { ChartNoAxesColumnIncreasing, TimerReset, Zap } from "lucide-react";
-import { formatRemaining, formatResetAt, formatResetCountdown, limitTooltip } from "./limits";
+import { formatRemaining, formatResetAt, formatResetCountdown, limitTooltip, providerDetails } from "./limits";
 import { QuotaStatus } from "./QuotaStatus";
 import { ServiceMark } from "./ServiceMark";
-import type { LimitScope, LiveProviderLimits } from "./types";
+import type { LimitScope, ProviderQuotaState } from "./types";
 
 const TITLE = { codex: "Codex", claude: "Claude Code" } as const;
 
 export function ToolChipRail({ variant, limits, scope, now }: {
   variant: "codex" | "claude";
-  limits: LiveProviderLimits | null;
+  limits: ProviderQuotaState | null;
   scope: LimitScope;
   now: Date;
 }) {
@@ -33,7 +33,7 @@ export function ToolChipRail({ variant, limits, scope, now }: {
         <QuotaStatus provider={limits} label={`${TITLE[variant]} 残量取得の詳細`}
           expanded={showDetails} onClick={() => setShowDetails((open) => !open)} />
       </div>
-      {failed && showDetails ? <div className="quotaDetails" role="status">{limits.message}</div> : null}
+      {failed && showDetails ? <div className="quotaDetails" role="status">{providerDetails(limits)}</div> : null}
       <div className="chip" data-selected={scope === "fiveHour"}
         data-warn={limits?.fiveHour != null && limits.fiveHour.remainingPercent <= 15} title={limitTooltip(limits, limits?.fiveHour)}>
         <span className="chip__lead"><Zap size={12} />5h残</span>

@@ -169,6 +169,7 @@ h1, h2 { margin: 0; }
 .manaRing__readout { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; }
 .manaRing__title { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; font-weight: 600; letter-spacing: 0.25em; color: #bfd3ef; }
 .manaRing__value {
+  position: relative;
   color: var(--service-color);
   font-size: 42px;
   font-weight: 750;
@@ -178,6 +179,7 @@ h1, h2 { margin: 0; }
   text-shadow: 0 0 16px var(--service-glow);
 }
 .manaRing__value > span { font-size: 0.68em; letter-spacing: -0.04em; margin-left: 1px; }
+.manaRing__value > .manaRing__stale { position: absolute; top: 0; right: -13px; display: flex; color: var(--danger); }
 .manaRing__services { display: flex; align-items: center; gap: 4px; }
 .manaRing__serviceButton { display: grid; place-items: center; width: 24px; height: 24px; padding: 2px; border: 1px solid transparent; border-radius: 6px; background: transparent; }
 .manaRing__serviceButton .serviceMark { width: 17px; height: 17px; filter: none; }
