@@ -43,6 +43,10 @@ enum LimitError {
     OpenUsageTimeout,
     ClaudeAuthExpired,
     ClaudeAuthRequired,
+    ClaudeAuthRejected,
+    ClaudeRateLimited,
+    ClaudeServer,
+    ClaudeNetwork,
     ClaudeApi,
     ClaudeData,
 }
@@ -54,6 +58,11 @@ impl LimitError {
             Self::OpenUsageNotFound => "openusage_not_found",
             Self::ClaudeAuthExpired => "auth_expired",
             Self::ClaudeAuthRequired | Self::CodexAccount => "auth_required",
+            Self::ClaudeAuthRejected => "auth_rejected",
+            Self::ClaudeRateLimited => "rate_limited",
+            Self::ClaudeServer => "server_error",
+            Self::ClaudeNetwork => "network_error",
+            Self::ClaudeApi => "api_error",
             Self::CodexTimeout | Self::OpenUsageTimeout => "timeout",
             _ => "fetch_failed",
         }
@@ -72,6 +81,10 @@ impl LimitError {
             Self::OpenUsageTimeout => "OpenUsage の取得がタイムアウトしました。再読み込みしてください。",
             Self::ClaudeAuthExpired => "Claude Code の認証期限が切れています。Claude Code を起動し、必要なら /login でログインし直してから再読み込みしてください。",
             Self::ClaudeAuthRequired => "Claude Code の認証情報がありません。Claude Code で /login を実行してから再読み込みしてください。",
+            Self::ClaudeAuthRejected => "Claude の利用枠 API が認証・アクセスを拒否しました（401/403）。Claude Code の /usage を確認し、認証エラーが出る場合は /login でログインし直してください。",
+            Self::ClaudeRateLimited => "Claude の利用枠 API の取得頻度が制限されています（429）。待機後に自動で再試行します。再読み込みでも待機時間は短縮しません。",
+            Self::ClaudeServer => "Claude の利用枠 API でサーバーエラーが発生しました（5xx）。時間をおいて自動で再試行します。",
+            Self::ClaudeNetwork => "Claude の利用枠 API との通信に失敗しました。接続・VPN・プロキシの状態を確認してください。時間をおいて自動で再試行します。",
             Self::ClaudeApi => "Claude の利用枠 API に接続できません。Claude Code の /usage を確認し、時間をおいて再読み込みしてください。",
             Self::ClaudeData => "OpenUsage から Claude の利用枠が返りませんでした。Claude Code のログイン状態と契約を確認してください。",
         }
@@ -353,21 +366,59 @@ fn parse_claude_snapshot(snapshot: &Value) -> WindowsResult {
             .unwrap_or("")
             .to_lowercase();
         // Only classified messages reach the UI; provider diagnostics may contain private data.
-        return Err(if diagnostic.contains("token expired") {
-            LimitError::ClaudeAuthExpired
-        } else if diagnostic.contains("no oauth")
-            || diagnostic.contains("no credentials")
-            || diagnostic.contains("not found")
-            || diagnostic.contains("missing")
-        {
-            LimitError::ClaudeAuthRequired
-        } else if !diagnostic.is_empty() {
-            LimitError::ClaudeApi
-        } else {
-            LimitError::ClaudeData
-        });
+        return Err(classify_claude_error(&diagnostic));
     }
     Ok(result)
+}
+
+fn classify_claude_error(diagnostic: &str) -> LimitError {
+    // On Windows the unsupported cookie source precedes the actual OAuth error.
+    let diagnostic = diagnostic
+        .rsplit_once("; oauth: ")
+        .map_or(diagnostic, |(_, oauth)| oauth);
+    // Match explicit HTTP markers, not arbitrary numbers or words in response bodies.
+    let status = ["api returned ", "http status ", "http ", "status code "]
+        .iter()
+        .find_map(|marker| {
+            let rest = diagnostic.split_once(marker)?.1;
+            let code = rest.get(..3)?;
+            if rest.as_bytes().get(3).is_some_and(u8::is_ascii_digit) {
+                return None;
+            }
+            code.parse::<u16>().ok()
+        });
+    if let Some(status) = status {
+        return match status {
+            401 | 403 => LimitError::ClaudeAuthRejected,
+            429 => LimitError::ClaudeRateLimited,
+            500..=599 => LimitError::ClaudeServer,
+            _ => LimitError::ClaudeApi,
+        };
+    }
+    if diagnostic.contains("token expired") {
+        LimitError::ClaudeAuthExpired
+    } else if diagnostic.contains("no oauth")
+        || diagnostic.contains("no credentials")
+        || (diagnostic.contains("reading claude code credentials")
+            && (diagnostic.contains("no such file") || diagnostic.contains("cannot find")))
+        || diagnostic == "credentials not found"
+    {
+        LimitError::ClaudeAuthRequired
+    } else if diagnostic.contains("api request failed")
+        || diagnostic.contains("connection refused")
+        || diagnostic.contains("connection reset")
+        || diagnostic.contains("no such host")
+        || diagnostic.contains("tls handshake")
+        || diagnostic.contains("context deadline exceeded")
+        || diagnostic.contains("timeout")
+        || diagnostic.contains("timed out")
+    {
+        LimitError::ClaudeNetwork
+    } else if diagnostic.is_empty() {
+        LimitError::ClaudeData
+    } else {
+        LimitError::ClaudeApi
+    }
 }
 
 async fn run_with_timeout(
@@ -519,7 +570,10 @@ mod tests {
         for (diagnostic, expected) in [
             ("token expired", LimitError::ClaudeAuthExpired),
             ("no credentials", LimitError::ClaudeAuthRequired),
-            ("HTTP 429 private-account-data", LimitError::ClaudeApi),
+            (
+                "HTTP 429 private-account-data",
+                LimitError::ClaudeRateLimited,
+            ),
             ("", LimitError::ClaudeData),
         ] {
             let payload = json!({"snapshots": [
@@ -651,13 +705,124 @@ mod tests {
             "diagnostics": {"usage_api_error": "HTTP 429 private-account-data"}
         }]});
         let result = parse_claude(payload.to_string().as_bytes());
-        assert_eq!(result.unwrap_err(), LimitError::ClaudeApi);
-        assert!(!LimitError::ClaudeApi
+        assert_eq!(result.unwrap_err(), LimitError::ClaudeRateLimited);
+        assert!(!LimitError::ClaudeRateLimited
             .message()
             .contains("private-account-data"));
         let provider = provider_result(Ok((None, None)), "Codex app-server", LimitError::CodexData);
         assert!(provider.five_hour.is_none());
         assert_eq!(provider.status, "unavailable");
+    }
+
+    #[test]
+    fn classifies_claude_api_failures_without_exposing_diagnostics() {
+        for (diagnostic, expected, code) in [
+            (
+                "API returned 429: private-account-data missing",
+                LimitError::ClaudeRateLimited,
+                "rate_limited",
+            ),
+            (
+                "HTTP 429 private-account-data",
+                LimitError::ClaudeRateLimited,
+                "rate_limited",
+            ),
+            (
+                "cookie source not found; oauth: API returned 429: private-account-data",
+                LimitError::ClaudeRateLimited,
+                "rate_limited",
+            ),
+            (
+                "API returned 401: private-account-data",
+                LimitError::ClaudeAuthRejected,
+                "auth_rejected",
+            ),
+            (
+                "API returned 403: private-account-data",
+                LimitError::ClaudeAuthRejected,
+                "auth_rejected",
+            ),
+            (
+                "API returned 500: private-account-data",
+                LimitError::ClaudeServer,
+                "server_error",
+            ),
+            (
+                "API returned 503: private-account-data",
+                LimitError::ClaudeServer,
+                "server_error",
+            ),
+            (
+                "API returned 404: not found private-account-data",
+                LimitError::ClaudeApi,
+                "api_error",
+            ),
+            (
+                "API request failed: timeout private-account-data",
+                LimitError::ClaudeNetwork,
+                "network_error",
+            ),
+            (
+                "API request failed: TLS private-account-data",
+                LimitError::ClaudeNetwork,
+                "network_error",
+            ),
+            (
+                "no such host private-account-data",
+                LimitError::ClaudeNetwork,
+                "network_error",
+            ),
+            (
+                "parsing response: missing field private-account-data",
+                LimitError::ClaudeApi,
+                "api_error",
+            ),
+            (
+                "account 429 private-account-data",
+                LimitError::ClaudeApi,
+                "api_error",
+            ),
+            (
+                "HTTP 4290 private-account-data",
+                LimitError::ClaudeApi,
+                "api_error",
+            ),
+        ] {
+            let payload = json!({"snapshots": [{
+                "provider_id": "claude_code", "metrics": {},
+                "diagnostics": {"usage_api_error": diagnostic}
+            }]});
+            let result = parse_claude(payload.to_string().as_bytes());
+            assert_eq!(result.as_ref().unwrap_err(), &expected, "{diagnostic}");
+            let serialized = serde_json::to_string(&provider_result(
+                result,
+                "OpenUsage",
+                LimitError::ClaudeData,
+            ))
+            .unwrap();
+            assert!(serialized.contains(code));
+            assert!(!serialized.contains("private-account-data"));
+        }
+    }
+
+    #[test]
+    fn cookie_failure_does_not_hide_oauth_authentication_error() {
+        for (diagnostic, expected) in [
+            (
+                "cookie source not found; oauth: Claude Code OAuth token expired",
+                LimitError::ClaudeAuthExpired,
+            ),
+            (
+                "cookie source unsupported; oauth: no OAuth access token in private-path",
+                LimitError::ClaudeAuthRequired,
+            ),
+            (
+                "reading Claude Code credentials: The system cannot find the file specified",
+                LimitError::ClaudeAuthRequired,
+            ),
+        ] {
+            assert_eq!(classify_claude_error(&diagnostic.to_lowercase()), expected);
+        }
     }
 
     #[test]

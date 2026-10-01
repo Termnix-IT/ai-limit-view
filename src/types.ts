@@ -22,3 +22,14 @@ export interface LiveLimits {
   codex: LiveProviderLimits | null;
   claude: LiveProviderLimits | null;
 }
+
+// Frontend state only; the Tauri response remains LiveProviderLimits.
+export interface ProviderQuotaState extends LiveProviderLimits {
+  lastSuccessAt: string | null;
+  nextRetryAt: string | null;
+}
+
+export interface LiveQuotaState {
+  codex: ProviderQuotaState | null;
+  claude: ProviderQuotaState | null;
+}

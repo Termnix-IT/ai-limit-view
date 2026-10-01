@@ -294,6 +294,121 @@ describe("App", () => {
     expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("polls Codex every minute and Claude every five minutes", async () => {
+    vi.useFakeTimers();
+    const view = render(<App />);
+    try {
+      await act(async () => {});
+      await act(async () => { await vi.advanceTimersByTimeAsync(299_000); });
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "codex")).toHaveLength(5);
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "claude_code")).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "claude_code")).toHaveLength(2);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("backs off repeated 429s, ignores manual reloads during cooldown and resets after recovery", async () => {
+    vi.useFakeTimers();
+    let claudeRequests = 0;
+    invokeMock.mockImplementation((_command: string, { provider }: { provider: LimitProvider }) => {
+      if (provider === "codex") return Promise.resolve(liveLimits.codex);
+      claudeRequests += 1;
+      return Promise.resolve(claudeRequests < 5 ? {
+        ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+        errorCode: "rate_limited", message: "429: 待機後に自動で再試行します。",
+      } : liveLimits.claude);
+    });
+    const view = render(<App />);
+    try {
+      await act(async () => {});
+      expect(screen.getByText("取得制限")).toBeInTheDocument();
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "再読み込み" })); });
+      expect(claudeRequests).toBe(1);
+      for (const delay of [300_000, 600_000, 1_200_000, 1_800_000]) {
+        const previousRequests = claudeRequests;
+        await act(async () => { await vi.advanceTimersByTimeAsync(delay - 1000); });
+        expect(claudeRequests).toBe(previousRequests);
+        await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+        expect(claudeRequests).toBe(previousRequests + 1);
+      }
+      expect(ring()).toHaveTextContent("94%");
+      expect(screen.queryByText("取得制限")).toBeNull();
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+      expect(claudeRequests).toBe(6);
+      expect(invokeMock.mock.calls.filter(([, args]) => args.provider === "codex").length).toBeGreaterThan(50);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it.each(["server_error", "network_error", "api_error", "timeout", "rejection"])("keeps previous quotas on %s, marks them stale in minimal mode and recovers", async (errorCode) => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    invokeMock.mockImplementation((_command: string, { provider }: { provider: LimitProvider }) => {
+      if (provider === "codex") return Promise.resolve(liveLimits.codex);
+      if (errorCode === "rejection") return Promise.reject(new Error("private-diagnostic"));
+      return Promise.resolve({ ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+        checkedAt: "2026-09-28T00:05:00Z", errorCode, message: "時間をおいて再試行します。" });
+    });
+    await user.click(screen.getByRole("button", { name: "再読み込み" }));
+    expect(await screen.findByText("更新失敗")).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("94%");
+    expect(ring()).toHaveAccessibleName(/前回の取得値/);
+    expect(ring()).toHaveAttribute("title", expect.stringContaining("最終取得 2026-09-28 09:00"));
+    expect(document.body).not.toHaveTextContent("private-diagnostic");
+    await user.click(screen.getByRole("button", { name: "取得状況" }));
+    const details = screen.getByRole("region", { name: "Claude Code 取得状況" });
+    expect(details).toHaveTextContent("最終取得2026-09-28 09:00");
+    expect(details).toHaveTextContent("次回再試行");
+    expect(details).toHaveTextContent("表示中の残量は前回の取得値です。");
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
+    expect(ring()).toHaveAccessibleName(/前回の取得値/);
+    expect(document.querySelector(".manaRing__stale")).not.toBeNull();
+    await user.click(ring());
+    expect(ring()).toHaveTextContent("68%");
+    await user.click(screen.getByRole("button", { name: "通常モードに戻す" }));
+    mockLimits({ ...liveLimits, claude: { ...liveLimits.claude, checkedAt: "2026-09-28T00:10:00Z",
+      fiveHour: { usedPercent: 10, remainingPercent: 90, resetsAt: null }, weekly: null } });
+    await user.click(screen.getByRole("button", { name: "再読み込み" }));
+    await waitFor(() => expect(screen.queryByText("更新失敗")).toBeNull());
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).not.toHaveAccessibleName(/前回の取得値/);
+    await user.click(ring());
+    expect(ring()).toHaveTextContent("90%");
+  });
+
+  it("drops cached quotas when authentication is rejected", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    mockLimits({ ...liveLimits, claude: { ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+      errorCode: "auth_rejected", message: "Claude API が認証・アクセスを拒否しました（403）。" } });
+    await user.click(screen.getByRole("button", { name: "再読み込み" }));
+    expect(await screen.findByText("認証拒否")).toBeInTheDocument();
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).not.toHaveAccessibleName(/前回の取得値/);
+  });
+
+  it("keeps cached quotas through a 429 cooldown and replaces them on the automatic retry", async () => {
+    vi.useFakeTimers();
+    const view = render(<App />);
+    try {
+      await act(async () => {});
+      mockLimits({ ...liveLimits, claude: { ...liveLimits.claude, status: "unavailable", fiveHour: null, weekly: null,
+        errorCode: "rate_limited", message: "429: 待機後に再試行します。" } });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "再読み込み" })); });
+      expect(ring()).toHaveTextContent("94%");
+      expect(ring()).toHaveAccessibleName(/前回の取得値/);
+      expect(screen.getByText("更新失敗")).toBeInTheDocument();
+      mockLimits({ ...liveLimits, claude: { ...liveLimits.claude,
+        fiveHour: { usedPercent: 100, remainingPercent: 0, resetsAt: null } } });
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: "再読み込み" })); });
+      expect(ring()).toHaveTextContent("94%");
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000); });
+      expect(ring()).toHaveTextContent("0%");
+      expect(ring()).not.toHaveAccessibleName(/前回の取得値/);
+      expect(screen.queryByText("更新失敗")).toBeNull();
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
   it("keeps normal controls available if the native shadow change fails", async () => {
     setShadowMock.mockRejectedValueOnce(new Error("Native shadow update failed"));
     const user = userEvent.setup(); render(<App />);

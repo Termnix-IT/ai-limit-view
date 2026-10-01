@@ -1,5 +1,5 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Clock3, Maximize2, Sparkles } from "lucide-react";
+import { Clock3, Maximize2, Sparkles, TriangleAlert } from "lucide-react";
 import type { MouseEvent, WheelEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ServiceMark } from "./ServiceMark";
@@ -13,12 +13,13 @@ interface ManaRingProps {
   onToggleScope: () => void;
   onSwitchTool: (tool: ToolKind) => void;
   minimal?: boolean;
+  staleMessage?: string | null;
   onExitMinimal?: () => void;
 }
 
 export function ManaRing({
   codexRemainingPercent, claudeRemainingPercent, activeTool, scope,
-  onToggleScope, onSwitchTool, minimal = false, onExitMinimal,
+  onToggleScope, onSwitchTool, minimal = false, onExitMinimal, staleMessage = null,
 }: ManaRingProps) {
   const activeLabel = activeTool === "codex" ? "Codex" : "Claude Code";
   const activePercent = activeTool === "codex" ? codexRemainingPercent : claudeRemainingPercent;
@@ -80,11 +81,12 @@ export function ManaRing({
       </svg>
       <div className="manaRing__center" data-unknown={activePercent === null} onWheel={handleWheel}>
         <button type="button" className="manaRing__readout" onClick={onToggleScope}
-          aria-label={`残量枠切替 (現在 ${scopeLabel} / ${activeLabel})`}
-          title="クリックで5時間枠 / 週間枠切替 · ホイールでサービス切替">
+          aria-label={`残量枠切替 (現在 ${scopeLabel} / ${activeLabel})${staleMessage ? " · 前回の取得値（更新失敗）" : ""}`}
+          title={staleMessage ?? "クリックで5時間枠 / 週間枠切替 · ホイールでサービス切替"}>
           <span className="manaRing__title"><Sparkles size={12} aria-hidden="true" />MANA</span>
           <strong className="manaRing__value">
             {activePercent === null ? "—" : <>{Math.round(clamp(activePercent))}<span>%</span></>}
+            {staleMessage && activePercent !== null ? <span className="manaRing__stale" aria-hidden="true"><TriangleAlert size={10} /></span> : null}
           </strong>
         </button>
         <div className="manaRing__services" role="group" aria-label="外側リングのサービス">
