@@ -1,4 +1,4 @@
-import { Minimize2, Minus, RefreshCw, Settings, X } from "lucide-react";
+import { Minimize2, Minus, RefreshCw, Settings, SlidersHorizontal, X } from "lucide-react";
 import appIcon from "../src-tauri/icons/32x32.png";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -8,11 +8,13 @@ interface TitlebarProps {
   onSettings: () => void;
   onMinimal: () => void;
   settingsOpen: boolean;
+  onOptions: () => void;
+  optionsOpen: boolean;
   syncedAt?: string | null;
   refreshing: boolean;
 }
 
-export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, syncedAt, refreshing }: TitlebarProps) {
+export function Titlebar({ onReload, onSettings, onOptions, onMinimal, settingsOpen, optionsOpen, syncedAt, refreshing }: TitlebarProps) {
   const handleDragStart = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
@@ -51,12 +53,18 @@ export function Titlebar({ onReload, onSettings, onMinimal, settingsOpen, synced
         </button>
         <button
           aria-label={settingsOpen ? "取得状況を閉じる" : "取得状況"}
+          title="取得状況"
           aria-pressed={settingsOpen}
           className={`titlebar__btn${settingsOpen ? " active" : ""}`}
           onClick={onSettings}
           type="button"
         >
           <Settings size={13} />
+        </button>
+        <button type="button" className={`titlebar__btn${optionsOpen ? " active" : ""}`}
+          aria-label={optionsOpen ? "オプションを閉じる" : "オプション"} title="オプション"
+          aria-pressed={optionsOpen} onClick={onOptions}>
+          <SlidersHorizontal size={13} />
         </button>
         <span className="titlebar__divider" aria-hidden="true" />
         <button

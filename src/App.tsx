@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { LimitsSettings } from "./LimitsSettings";
+import { AppOptions } from "./AppOptions";
 import { ManaRing } from "./ManaRing";
 import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
@@ -24,7 +25,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const [minimal, setMinimal] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [panel, setPanel] = useState<"limits" | "options" | null>(null);
   const [activeRingTool, setActiveRingTool] = useState<ToolKind>("claude_code");
   const [scope, setScope] = useState<LimitScope>("fiveHour");
 
@@ -81,7 +82,7 @@ export function App() {
       await win.setShadow(false);
       await win.setSize(new LogicalSize(MINIMAL_SIZE[0], MINIMAL_SIZE[1]));
       await win.setAlwaysOnTop(true);
-      setSettingsOpen(false);
+      setPanel(null);
       setMinimal(true);
       setError(null);
     } catch (err) {
@@ -120,14 +121,16 @@ export function App() {
           syncedAt={syncedAt}
           refreshing={refreshing}
           onReload={() => void refreshLiveLimits(true)}
-          onSettings={() => setSettingsOpen((open) => !open)}
-          settingsOpen={settingsOpen}
+          onSettings={() => setPanel((current) => current === "limits" ? null : "limits")}
+          settingsOpen={panel === "limits"}
+          onOptions={() => setPanel((current) => current === "options" ? null : "options")}
+          optionsOpen={panel === "options"}
           onMinimal={() => void enterMinimal()}
         />
       )}
-      <section className={`workspace${settingsOpen && !minimal ? " workspace--settings" : ""}`}>
+      <section className={`workspace${panel && !minimal ? " workspace--settings" : ""}`}>
         {error && !minimal ? <div className="alert danger">{error}</div> : null}
-        {settingsOpen && !minimal ? (
+        {panel === "options" && !minimal ? <AppOptions /> : panel === "limits" && !minimal ? (
           <LimitsSettings limits={liveLimits} refreshing={refreshing} onRefresh={() => void refreshLiveLimits(true)} />
         ) : (
           <>

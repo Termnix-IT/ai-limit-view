@@ -262,6 +262,16 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 
 /* Retrieval details share the HUD's type and status colors. */
 .workspace--settings, .workspace--settings:has(> .alert) { display: block; overflow-y: auto; padding-top: 12px; }
+.workspace--settings { scrollbar-width: thin; scrollbar-color: var(--ink-dim) var(--bg-deep); scrollbar-gutter: stable; }
+.workspace--settings::-webkit-scrollbar { width: 7px; }
+.workspace--settings::-webkit-scrollbar-track { background: var(--bg-deep); }
+.workspace--settings::-webkit-scrollbar-thumb { background: var(--ink-dim); border: 2px solid var(--bg-deep); border-radius: 8px; }
+.workspace--settings::-webkit-scrollbar-thumb:hover { background: var(--ink-mute); }
+.workspace--settings::-webkit-scrollbar-button { display: none; }
+.workspace--settings::-webkit-scrollbar-corner { background: var(--bg-deep); }
+@supports selector(::-webkit-scrollbar) {
+  .workspace--settings { scrollbar-width: auto; scrollbar-color: auto; }
+}
 .limitsSettings { display: grid; gap: 10px; }
 .limitsSettings__head, .providerDetails__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .limitsSettings__head h1 { font-size: 14px; }
@@ -276,6 +286,27 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .providerDetails dd { min-width: 0; margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .providerDetails dd span { display: block; margin-top: 2px; color: var(--ink-mute); font-size: 10px; }
 .providerDetails__message { margin: 8px 0 0; color: var(--danger); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.appOptions { display: grid; gap: 12px; padding-bottom: 8px; }
+.appOptions__head h1 { font-size: 14px; }
+.appOptions p { margin: 5px 0 0; color: var(--ink-mute); font-size: 11px; line-height: 1.6; }
+.appOptions__head p { font-size: 10px; }
+.appOptions h2 { font-size: 12px; }
+.appOptions__identity { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-block: 1px solid var(--line); }
+.appOptions__identity img { flex-shrink: 0; }
+.appOptions__identity span { display: block; margin-top: 6px; color: var(--ink-mute); font-size: 10px; }
+.appOptions__identity strong { display: block; margin-top: 3px; color: var(--codex-2); font-size: 24px; font-variant-numeric: tabular-nums; }
+.appOptions__updates > .refreshButton { margin-top: 12px; }
+.appOptions__result:empty { display: none; }
+.appOptions__result { margin-top: 12px; }
+.appOptions__result p { display: flex; align-items: flex-start; gap: 6px; }
+.appOptions__result svg { flex-shrink: 0; margin-top: 3px; }
+.appOptions__result[data-state="ok"] p { color: var(--success); }
+.appOptions__result[data-state="available"] p { color: var(--codex-2); }
+.appOptions__result[data-state="error"] p, .appOptions p.appOptions__error { color: var(--danger); }
+.appOptions__result span { display: block; margin-top: 6px; color: var(--ink-mute); font-size: 10px; line-height: 1.6; }
+.appOptions__footer { padding-top: 12px; border-top: 1px solid var(--line); }
+.appOptions__footer p { font-size: 10px; }
+.appOptions__spinner { animation: quota-spin 1.6s linear infinite; }
 .alert { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 11px; }
 .alert.danger { border-color: rgba(239, 107, 99, 0.55); color: var(--danger); }
 
@@ -323,4 +354,7 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+@media (forced-colors: active) {
+  .workspace--settings { scrollbar-color: auto; }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "ai-limitusage-watcher"
-version = "0.1.11"
+version = "0.1.12"
 description = "Local usage visibility app for Codex and Claude Code"
 authors = ["LimitView"]
 edition = "2021"
@@ -19,6 +19,9 @@ serde_json = "1.0.134"
 tauri = { version = "2.2.5", features = [] }
 tokio = { version = "1.52.1", features = ["io-util", "process", "time"] }
 process-wrap = { version = "=10.0.0", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "native-tls", "system-proxy"] }
+semver = "1.0"
+tauri-plugin-opener = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_System_Threading"] }
