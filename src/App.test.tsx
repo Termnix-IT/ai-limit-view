@@ -5,6 +5,7 @@ import { App } from "./App";
 import type { LimitProvider, LiveLimits, LiveProviderLimits } from "./types";
 
 const invokeMock = vi.fn();
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => Promise.resolve("0.1.12") }));
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: unknown) => invokeMock(command, args),
 }));
@@ -203,6 +204,23 @@ describe("App", () => {
     invokeMock.mockRejectedValue(new Error("backend unavailable")); render(<App />);
     expect(await screen.findAllByText("取得失敗")).toHaveLength(2);
     expect(screen.queryByText("取得中")).toBeNull();
+  });
+
+  it("switches between options and retrieval details while preserving the selected scope", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(ring());
+    await user.click(screen.getByRole("button", { name: "オプション" }));
+    expect(await screen.findByText("v0.1.12")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "取得状況" })).toBeNull();
+    expect(screen.getByRole("button", { name: "オプションを閉じる" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "取得状況" }));
+    expect(screen.getByRole("heading", { name: "取得状況" })).toBeInTheDocument();
+    expect(screen.queryByText("v0.1.12")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "取得状況を閉じる" }));
+    expect(ring()).toHaveAccessibleName(/週間/);
+    expect(ring()).toHaveTextContent("68%");
+    expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a failed selected service unknown while the other service succeeds", async () => {

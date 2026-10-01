@@ -33,3 +33,10 @@ export interface LiveQuotaState {
   codex: ProviderQuotaState | null;
   claude: ProviderQuotaState | null;
 }
+
+export interface AppUpdate {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  checkedAt: string;
+}
