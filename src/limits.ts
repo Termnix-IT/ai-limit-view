@@ -35,12 +35,16 @@ export function providerStatus(provider: ProviderQuotaState | null): string {
   if (hasCachedQuota(provider)) return "更新失敗";
   switch (provider.errorCode) {
     case "auth_expired":
+    case "auth_refresh_start_failed":
+    case "auth_refresh_failed":
     case "auth_required": return "要認証";
     case "auth_rejected": return "認証拒否";
     case "rate_limited": return "取得制限";
     case "server_error": return "サーバー障害";
     case "network_error": return "通信失敗";
-    case "codex_not_found": return "CLI未検出";
+    case "codex_not_found":
+    case "auth_refresh_cli_missing": return "CLI未検出";
+    case "auth_refresh_timeout":
     case "timeout": return "時間超過";
     default: return "取得失敗";
   }

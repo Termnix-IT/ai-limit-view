@@ -17,7 +17,7 @@ chrono = "0.4.39"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.134"
 tauri = { version = "2.2.5", features = [] }
-tokio = { version = "1.52.1", features = ["io-util", "process", "time"] }
+tokio = { version = "1.52.1", features = ["io-util", "process", "time", "sync"] }
 process-wrap = { version = "=10.0.0", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "native-tls", "system-proxy"] }
 semver = "1.0"

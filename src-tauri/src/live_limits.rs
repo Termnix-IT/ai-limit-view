@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines};
@@ -9,6 +10,18 @@ use tokio::process::ChildStdout;
 
 const CODEX_TIMEOUT: Duration = Duration::from_secs(25);
 const OPENUSAGE_TIMEOUT: Duration = Duration::from_secs(60);
+const AUTH_COOLDOWN: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Default)]
+struct ClaudeRecovery {
+    cooldown_until: Option<std::time::Instant>,
+    failure: Option<LimitError>,
+}
+
+fn claude_recovery() -> &'static tokio::sync::Mutex<ClaudeRecovery> {
+    static STATE: OnceLock<tokio::sync::Mutex<ClaudeRecovery>> = OnceLock::new();
+    STATE.get_or_init(|| tokio::sync::Mutex::new(ClaudeRecovery::default()))
+}
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +55,10 @@ enum LimitError {
     OpenUsageRun,
     OpenUsageTimeout,
     ClaudeAuthExpired,
+    ClaudeRefreshNotFound,
+    ClaudeRefreshStart,
+    ClaudeRefreshTimeout,
+    ClaudeRefreshFailed,
     ClaudeAuthRequired,
     ClaudeAuthRejected,
     ClaudeRateLimited,
@@ -57,6 +74,10 @@ impl LimitError {
             Self::CodexNotFound => "codex_not_found",
             Self::OpenUsageNotFound => "openusage_not_found",
             Self::ClaudeAuthExpired => "auth_expired",
+            Self::ClaudeRefreshNotFound => "auth_refresh_cli_missing",
+            Self::ClaudeRefreshStart => "auth_refresh_start_failed",
+            Self::ClaudeRefreshTimeout => "auth_refresh_timeout",
+            Self::ClaudeRefreshFailed => "auth_refresh_failed",
             Self::ClaudeAuthRequired | Self::CodexAccount => "auth_required",
             Self::ClaudeAuthRejected => "auth_rejected",
             Self::ClaudeRateLimited => "rate_limited",
@@ -79,7 +100,11 @@ impl LimitError {
             Self::OpenUsageNotFound => "同梱 OpenUsage が見つかりません。LimitView を再インストールしてください。",
             Self::OpenUsageRun => "OpenUsage の実行に失敗しました。再読み込みしてください。",
             Self::OpenUsageTimeout => "OpenUsage の取得がタイムアウトしました。再読み込みしてください。",
-            Self::ClaudeAuthExpired => "Claude Code の認証期限が切れています。Claude Code を起動し、必要なら /login でログインし直してから再読み込みしてください。",
+            Self::ClaudeAuthExpired => "Claude Code の認証期限が切れており、自動更新で復旧できませんでした。Claude Code を起動し、必要なら /login 後に再読み込みしてください。失敗後30分間は自動更新の再起動を控えます。",
+            Self::ClaudeRefreshNotFound => "認証期限が切れていますが、更新用の Claude Code CLI が見つかりません。CLI のインストール状態を確認し、Claude Code を起動してから再読み込みしてください。失敗後30分間は自動更新の再起動を控えます。",
+            Self::ClaudeRefreshStart => "Claude Code の認証更新処理を起動できませんでした。Claude Code を手動で起動してから再読み込みしてください。失敗後30分間は自動更新の再起動を控えます。",
+            Self::ClaudeRefreshTimeout => "Claude Code の認証更新が20秒以内に終了しなかったため停止しました。Claude Code を手動で起動し、必要なら /login 後に再読み込みしてください。失敗後30分間は自動更新の再起動を控えます。",
+            Self::ClaudeRefreshFailed => "Claude Code の認証更新処理が正常終了しませんでした。Claude Code を手動で起動し、必要なら /login 後に再読み込みしてください。失敗後30分間は自動更新の再起動を控えます。",
             Self::ClaudeAuthRequired => "Claude Code の認証情報がありません。Claude Code で /login を実行してから再読み込みしてください。",
             Self::ClaudeAuthRejected => "Claude の利用枠 API が認証・アクセスを拒否しました（401/403）。Claude Code の /usage を確認し、認証エラーが出る場合は /login でログインし直してください。",
             Self::ClaudeRateLimited => "Claude の利用枠 API の取得頻度が制限されています（429）。待機後に自動で再試行します。再読み込みでも待機時間は短縮しません。",
@@ -154,7 +179,25 @@ pub async fn get_provider_limits(app: tauri::AppHandle, provider: Provider) -> P
             path.is_file().then_some(path)
         });
     let result = match openusage {
-        Some(path) => claude_limits(&path).await,
+        Some(path) => {
+            // Serialize Claude requests through the entire fetch/recovery/fetch cycle.
+            // Codex remains independent. Never hold a synchronous lock across awaits.
+            let mut recovery = claude_recovery().lock().await;
+            let working_dir = app
+                .path()
+                .app_local_data_dir()
+                .ok()
+                .map(|dir| dir.join("auth-refresh"));
+            claude_with_recovery(
+                &mut recovery,
+                || claude_limits(&path),
+                || async {
+                    let dir = working_dir.ok_or(crate::claude_auth::RefreshError::Start)?;
+                    crate::claude_auth::refresh(&dir).await
+                },
+            )
+            .await
+        }
         None => Err(LimitError::OpenUsageNotFound),
     };
     provider_result(result, "OpenUsage", LimitError::ClaudeData)
@@ -327,6 +370,61 @@ async fn claude_limits(path: &Path) -> WindowsResult {
     parse_claude(&output)
 }
 
+async fn claude_with_recovery<F, FF, R, RF>(
+    state: &mut ClaudeRecovery,
+    mut fetch: F,
+    refresh: R,
+) -> WindowsResult
+where
+    F: FnMut() -> FF,
+    FF: std::future::Future<Output = WindowsResult>,
+    R: FnOnce() -> RF,
+    RF: std::future::Future<Output = Result<(), crate::claude_auth::RefreshError>>,
+{
+    let result = fetch().await;
+    if result.is_ok() {
+        *state = ClaudeRecovery::default();
+        return result;
+    }
+    if result.as_ref().err() != Some(&LimitError::ClaudeAuthExpired) {
+        return result;
+    }
+    if state
+        .cooldown_until
+        .is_some_and(|until| std::time::Instant::now() < until)
+    {
+        return Err(state.failure.unwrap_or(LimitError::ClaudeAuthExpired));
+    }
+    // Set before starting: cancellation must not permit repeated CLI launches.
+    state.cooldown_until = Some(std::time::Instant::now() + AUTH_COOLDOWN);
+    state.failure = Some(LimitError::ClaudeAuthExpired);
+    let result = match refresh().await {
+        Ok(()) => fetch().await,
+        Err(error) => Err(match error {
+            crate::claude_auth::RefreshError::NotFound => LimitError::ClaudeRefreshNotFound,
+            crate::claude_auth::RefreshError::Start => LimitError::ClaudeRefreshStart,
+            crate::claude_auth::RefreshError::Timeout => LimitError::ClaudeRefreshTimeout,
+            crate::claude_auth::RefreshError::Failed => LimitError::ClaudeRefreshFailed,
+        }),
+    };
+    if result.is_ok() {
+        *state = ClaudeRecovery::default();
+    } else {
+        // The full cooldown starts after failure, including a slow second fetch.
+        state.cooldown_until = Some(std::time::Instant::now() + AUTH_COOLDOWN);
+        state.failure = result.as_ref().err().copied().filter(|error| {
+            matches!(
+                error,
+                LimitError::ClaudeRefreshNotFound
+                    | LimitError::ClaudeRefreshStart
+                    | LimitError::ClaudeRefreshTimeout
+                    | LimitError::ClaudeRefreshFailed
+            )
+        });
+    }
+    result
+}
+
 fn parse_claude(output: &[u8]) -> WindowsResult {
     let payload: Value = serde_json::from_slice(output).map_err(|_| LimitError::ClaudeData)?;
     let snapshots = payload
@@ -472,6 +570,135 @@ async fn run_with_timeout(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recovery_retries_expiry_once_and_clears_cooldown_on_success() {
+        tauri::async_runtime::block_on(async {
+            let mut state = ClaudeRecovery::default();
+            let mut calls = 0;
+            let result = claude_with_recovery(
+                &mut state,
+                || {
+                    calls += 1;
+                    std::future::ready(if calls == 1 {
+                        Err(LimitError::ClaudeAuthExpired)
+                    } else {
+                        Ok((Some(window(Some(20.0), None).unwrap()), None))
+                    })
+                },
+                || async { Ok(()) },
+            )
+            .await;
+            assert!(result.is_ok());
+            assert_eq!(calls, 2);
+            assert!(state.cooldown_until.is_none());
+        });
+    }
+
+    #[test]
+    fn recovery_skips_other_errors_and_blocks_repeated_refresh() {
+        tauri::async_runtime::block_on(async {
+            let mut state = ClaudeRecovery::default();
+            for error in [
+                LimitError::ClaudeRateLimited,
+                LimitError::ClaudeAuthRejected,
+                LimitError::ClaudeAuthRequired,
+                LimitError::ClaudeNetwork,
+            ] {
+                let result = claude_with_recovery(
+                    &mut state,
+                    || std::future::ready(Err(error)),
+                    || async { panic!("must not refresh other errors") },
+                )
+                .await;
+                assert_eq!(result.unwrap_err(), error);
+            }
+            let result = claude_with_recovery(
+                &mut state,
+                || std::future::ready(Err(LimitError::ClaudeAuthExpired)),
+                || async { Err(crate::claude_auth::RefreshError::NotFound) },
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), LimitError::ClaudeRefreshNotFound);
+            let result = claude_with_recovery(
+                &mut state,
+                || std::future::ready(Err(LimitError::ClaudeAuthExpired)),
+                || async { panic!("cooldown must prevent refresh") },
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), LimitError::ClaudeRefreshNotFound);
+            let result = claude_with_recovery(
+                &mut state,
+                || std::future::ready(Ok((Some(window(Some(10.0), None).unwrap()), None))),
+                || async { panic!("success must not refresh") },
+            )
+            .await;
+            assert!(result.is_ok());
+            assert!(state.cooldown_until.is_none());
+        });
+    }
+
+    #[test]
+    fn recovery_preserves_second_fetch_error_and_does_not_loop() {
+        tauri::async_runtime::block_on(async {
+            for error in [
+                LimitError::ClaudeAuthExpired,
+                LimitError::ClaudeRateLimited,
+                LimitError::ClaudeNetwork,
+            ] {
+                let mut state = ClaudeRecovery::default();
+                let mut calls = 0;
+                let result = claude_with_recovery(
+                    &mut state,
+                    || {
+                        calls += 1;
+                        std::future::ready(Err(if calls == 1 {
+                            LimitError::ClaudeAuthExpired
+                        } else {
+                            error
+                        }))
+                    },
+                    || async { Ok(()) },
+                )
+                .await;
+                assert_eq!(result.unwrap_err(), error);
+                assert_eq!(calls, 2);
+                assert!(state.cooldown_until.is_some());
+                state.cooldown_until = Some(std::time::Instant::now() - Duration::from_secs(1));
+                let result = claude_with_recovery(
+                    &mut state,
+                    || std::future::ready(Err(LimitError::ClaudeAuthExpired)),
+                    || async { Err(crate::claude_auth::RefreshError::Timeout) },
+                )
+                .await;
+                assert_eq!(result.unwrap_err(), LimitError::ClaudeRefreshTimeout);
+            }
+        });
+    }
+
+    #[test]
+    fn cancelled_recovery_retains_cooldown() {
+        tauri::async_runtime::block_on(async {
+            let mut state = ClaudeRecovery::default();
+            let result = tokio::time::timeout(
+                Duration::from_millis(10),
+                claude_with_recovery(
+                    &mut state,
+                    || std::future::ready(Err(LimitError::ClaudeAuthExpired)),
+                    || std::future::pending(),
+                ),
+            )
+            .await;
+            assert!(result.is_err());
+            let result = claude_with_recovery(
+                &mut state,
+                || std::future::ready(Err(LimitError::ClaudeAuthExpired)),
+                || async { panic!("cancelled update must not launch repeatedly") },
+            )
+            .await;
+            assert_eq!(result.unwrap_err(), LimitError::ClaudeAuthExpired);
+        });
+    }
 
     #[test]
     fn maps_codex_windows_by_duration() {

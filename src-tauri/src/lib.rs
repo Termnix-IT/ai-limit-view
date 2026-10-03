@@ -1,6 +1,7 @@
 use tauri::Manager;
 
 mod app_updates;
+mod claude_auth;
 mod live_limits;
 mod process;
 
