@@ -1,4 +1,5 @@
 node_modules
+.openusage-build/
 dist
 .claude/
 src-tauri/target

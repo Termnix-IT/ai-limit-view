@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { LimitProvider, LiveLimits, LiveProviderLimits } from "./types";
+import { load } from "@tauri-apps/plugin-store";
+import * as displaySettings from "./displaySettings";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: () => Promise.resolve("0.1.12") }));
@@ -79,7 +81,7 @@ describe("App", () => {
     ]);
   });
 
-  it("shows the ring and fetching state while quota retrieval is pending", () => {
+  it("shows the ring and fetching state while quota retrieval is pending", async () => {
     invokeMock.mockReturnValue(new Promise(() => {}));
     render(<App />);
     expect(ring()).toHaveAccessibleName(/5時間/);
@@ -87,6 +89,7 @@ describe("App", () => {
     expect(ring()).not.toHaveTextContent("0%");
     expect(screen.getAllByText("取得中")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "再読み込み" })).toBeDisabled();
+    await act(async () => {});
   });
 
   it("switches both rings between five-hour and weekly quotas without saving a plan", async () => {
@@ -425,6 +428,63 @@ describe("App", () => {
       expect(ring()).not.toHaveAccessibleName(/前回の取得値/);
       expect(screen.queryByText("更新失敗")).toBeNull();
     } finally { view.unmount(); vi.useRealTimers(); }
+  });
+
+  it("adds a third ring, saves provider colors, restores them on restart and resets to the current defaults", async () => {
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(screen.getByRole("button", { name: "オプション" }));
+    await user.click(screen.getByRole("button", { name: "3本" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "リング3のサービス" }), "kimi_cli");
+    fireEvent.change(screen.getByLabelText("Kimi Codeのリング色"), { target: { value: "#ab45ef" } });
+    await waitFor(async () => expect((await (await load("display-settings.json")).get<{ colors: { kimi_cli: string } }>("display"))?.colors.kimi_cli).toBe("#ab45ef"));
+    view.unmount();
+    render(<App />);
+    expect(await screen.findByRole("button", { name: "Kimi Codeを外側に表示" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("img", { name: /Kimi Code/ }).querySelectorAll(".manaRing__arc")).toHaveLength(3));
+    await user.click(screen.getByRole("button", { name: "Kimi Codeを外側に表示" }));
+    expect(screen.getByRole("img", { name: /外側 Kimi Code/ }).querySelector('#kimi_cliGrad stop[offset="100%"]')).toHaveAttribute("stop-color", "#ab45ef");
+    await user.click(screen.getByRole("button", { name: "オプション" }));
+    await user.click(screen.getByRole("button", { name: "初期設定に戻す" }));
+    await user.click(screen.getByRole("button", { name: "オプションを閉じる" }));
+    expect(screen.queryByRole("button", { name: "Kimi Codeを外側に表示" })).toBeNull();
+    expect(serviceButton("Claude Code")).toHaveAttribute("aria-pressed", "true");
+    expect(ring()).toHaveAccessibleName(/5時間/);
+  });
+
+  it("polls only the saved selected provider and switches monthly quota without pretending it is weekly", async () => {
+    const store = await load("display-settings.json");
+    await store.set("display", { version: 1, providers: ["kimi_cli"], colors: {}, initialScope: "standard" });
+    invokeMock.mockImplementation(() => Promise.resolve({ ...liveLimits.claude, fiveHour: null, weekly: null,
+      windows: [{ id: "usage_monthly", label: "月間", kind: "monthly", usedPercent: 25, remainingPercent: 75, resetsAt: null }] }));
+    const user = userEvent.setup(); render(<App />);
+    await waitFor(() => expect(ring()).toHaveTextContent("75%"));
+    expect(invokeMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith("get_provider_limits", { provider: "kimi_cli" });
+    expect(ring()).toHaveAccessibleName(/月間/);
+    await user.click(ring());
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).toHaveAccessibleName(/5時間/);
+    await user.click(ring());
+    expect(ring()).toHaveTextContent("—");
+    expect(ring()).toHaveAccessibleName(/週間/);
+    await user.click(ring());
+    expect(ring()).toHaveTextContent("75%");
+  });
+
+  it("reports a failed settings save without losing the current display change", async () => {
+    const save = vi.spyOn(displaySettings, "saveDisplaySettings").mockRejectedValue(new Error("disk unavailable"));
+    try {
+      const user = userEvent.setup(); render(<App />);
+      await screen.findByRole("img", { name: /Claude Code 94%/ });
+      await user.click(screen.getByRole("button", { name: "オプション" }));
+      await user.click(screen.getByRole("button", { name: "1本" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("再起動後に保持されません");
+      await user.click(screen.getByRole("button", { name: "オプションを閉じる" }));
+      expect(serviceButton("Codex")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Claude Codeを外側に表示" })).toBeNull();
+    } finally { save.mockRestore(); }
   });
 
   it("keeps normal controls available if the native shadow change fails", async () => {
