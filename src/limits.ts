@@ -46,6 +46,8 @@ export function providerStatus(provider: ProviderQuotaState | null): string {
     case "auth_refresh_cli_missing": return "CLI未検出";
     case "auth_refresh_timeout":
     case "timeout": return "時間超過";
+    case "subscription_unavailable": return "枠未取得";
+    case "stale_data": return "更新待ち";
     default: return "取得失敗";
   }
 }
