@@ -42,6 +42,8 @@ export function providerStatus(provider: ProviderQuotaState | null): string {
     case "network_error": return "通信失敗";
     case "codex_not_found": return "CLI未検出";
     case "timeout": return "時間超過";
+    case "subscription_unavailable": return "枠未取得";
+    case "stale_data": return "更新待ち";
     default: return "取得失敗";
   }
 }

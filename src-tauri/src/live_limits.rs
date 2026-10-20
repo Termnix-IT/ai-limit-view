@@ -13,25 +13,36 @@ const OPENUSAGE_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitWindow {
-    used_percent: f64,
-    remaining_percent: f64,
-    resets_at: Option<Value>,
+    pub(crate) used_percent: f64,
+    pub(crate) remaining_percent: f64,
+    pub(crate) resets_at: Option<Value>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionWindow {
+    pub(crate) id: String,
+    pub(crate) label: &'static str,
+    pub(crate) kind: &'static str,
+    #[serde(flatten)]
+    pub(crate) limit: LimitWindow,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimits {
-    status: &'static str,
-    source: &'static str,
-    checked_at: String,
-    five_hour: Option<LimitWindow>,
-    weekly: Option<LimitWindow>,
-    message: Option<&'static str>,
-    error_code: Option<&'static str>,
+    pub(crate) status: &'static str,
+    pub(crate) source: &'static str,
+    pub(crate) checked_at: String,
+    pub(crate) five_hour: Option<LimitWindow>,
+    pub(crate) weekly: Option<LimitWindow>,
+    pub(crate) windows: Vec<SubscriptionWindow>,
+    pub(crate) message: Option<&'static str>,
+    pub(crate) error_code: Option<&'static str>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LimitError {
+pub(crate) enum LimitError {
     CodexNotFound,
     CodexStart,
     CodexTimeout,
@@ -49,6 +60,11 @@ enum LimitError {
     ClaudeNetwork,
     ClaudeApi,
     ClaudeData,
+    ProviderAuth,
+    ProviderData,
+    ProviderRateLimited,
+    ProviderServer,
+    ProviderStale,
 }
 
 impl LimitError {
@@ -60,6 +76,11 @@ impl LimitError {
             Self::ClaudeAuthRequired | Self::CodexAccount => "auth_required",
             Self::ClaudeAuthRejected => "auth_rejected",
             Self::ClaudeRateLimited => "rate_limited",
+            Self::ProviderRateLimited => "rate_limited",
+            Self::ProviderAuth => "auth_required",
+            Self::ProviderData => "subscription_unavailable",
+            Self::ProviderServer => "server_error",
+            Self::ProviderStale => "stale_data",
             Self::ClaudeServer => "server_error",
             Self::ClaudeNetwork => "network_error",
             Self::ClaudeApi => "api_error",
@@ -87,6 +108,11 @@ impl LimitError {
             Self::ClaudeNetwork => "Claude の利用枠 API との通信に失敗しました。接続・VPN・プロキシの状態を確認してください。時間をおいて自動で再試行します。",
             Self::ClaudeApi => "Claude の利用枠 API に接続できません。Claude Code の /usage を確認し、時間をおいて再読み込みしてください。",
             Self::ClaudeData => "OpenUsage から Claude の利用枠が返りませんでした。Claude Code のログイン状態と契約を確認してください。",
+            Self::ProviderAuth => "認証情報が見つからないか、期限が切れています。サービス側でログインし、必要な場合は OpenUsage で連携を設定してください。",
+            Self::ProviderData => "サブスクリプションの残量を取得できませんでした。契約と OpenUsage の連携を確認してください。追加購入分・API残高・未対応の契約枠は表示しません。",
+            Self::ProviderRateLimited => "残量の取得頻度が制限されています。待機後に自動で再試行します。",
+            Self::ProviderServer => "サービス側で取得エラーが発生しました。時間をおいて自動で再試行します。",
+            Self::ProviderStale => "Antigravity CLI からの残量情報が更新されていません。CLI を起動して statusline 連携を確認してください。",
         }
     }
 }
@@ -98,9 +124,32 @@ type WindowsResult = Result<(Option<LimitWindow>, Option<LimitWindow>), LimitErr
 pub enum Provider {
     Codex,
     ClaudeCode,
+    Zai,
+    KimiCli,
+    CommandCode,
+    Opencode,
+    Antigravity,
+    Copilot,
+    Cursor,
 }
 
-fn window(used: Option<f64>, resets_at: Option<Value>) -> Option<LimitWindow> {
+impl Provider {
+    pub(crate) fn id(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::ClaudeCode => "claude_code",
+            Self::Zai => "zai",
+            Self::KimiCli => "kimi_cli",
+            Self::CommandCode => "command_code",
+            Self::Opencode => "opencode",
+            Self::Antigravity => "antigravity",
+            Self::Copilot => "copilot",
+            Self::Cursor => "cursor",
+        }
+    }
+}
+
+pub(crate) fn window(used: Option<f64>, resets_at: Option<Value>) -> Option<LimitWindow> {
     let used = used.filter(|n| n.is_finite() && (0.0..=100.0).contains(n))?;
     Some(LimitWindow {
         used_percent: used,
@@ -109,7 +158,7 @@ fn window(used: Option<f64>, resets_at: Option<Value>) -> Option<LimitWindow> {
     })
 }
 
-fn provider_result(
+pub(crate) fn provider_result(
     result: WindowsResult,
     source: &'static str,
     empty_error: LimitError,
@@ -121,12 +170,27 @@ fn provider_result(
         Ok(_) => ("unavailable", None, None, Some(empty_error)),
         Err(error) => ("unavailable", None, None, Some(error)),
     };
+    let windows = [
+        ("fiveHour", "5時間", five_hour.as_ref()),
+        ("weekly", "週間", weekly.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(kind, label, limit)| {
+        limit.map(|limit| SubscriptionWindow {
+            id: kind.to_string(),
+            label,
+            kind,
+            limit: limit.clone(),
+        })
+    })
+    .collect();
     ProviderLimits {
         status,
         source,
         checked_at: chrono::Utc::now().to_rfc3339(),
         five_hour,
         weekly,
+        windows,
         message: error.map(LimitError::message),
         error_code: error.map(LimitError::code),
     }
@@ -153,6 +217,22 @@ pub async fn get_provider_limits(app: tauri::AppHandle, provider: Provider) -> P
                 .join("openusage.exe");
             path.is_file().then_some(path)
         });
+    if !matches!(provider, Provider::ClaudeCode) {
+        return match openusage {
+            Some(path) => match run_openusage(&path, provider.id())
+                .await
+                .and_then(|output| crate::subscription_limits::parse(provider, &output))
+            {
+                Ok(result) => result,
+                Err(error) => provider_result(Err(error), "OpenUsage", LimitError::ProviderData),
+            },
+            None => provider_result(
+                Err(LimitError::OpenUsageNotFound),
+                "OpenUsage",
+                LimitError::ProviderData,
+            ),
+        };
+    }
     let result = match openusage {
         Some(path) => claude_limits(&path).await,
         None => Err(LimitError::OpenUsageNotFound),
@@ -318,13 +398,18 @@ fn parse_codex(data: &Value) -> WindowsResult {
 }
 
 async fn claude_limits(path: &Path) -> WindowsResult {
-    let output = run_with_timeout(
+    let output = run_openusage(path, "claude_code").await?;
+    parse_claude(&output)
+}
+
+async fn run_openusage(path: &Path, provider: &str) -> Result<Vec<u8>, LimitError> {
+    run_filtered_with_timeout(
         path,
         &["export", "--output", "-", "--source", "direct"],
         OPENUSAGE_TIMEOUT,
+        Some(provider),
     )
-    .await?;
-    parse_claude(&output)
+    .await
 }
 
 fn parse_claude(output: &[u8]) -> WindowsResult {
@@ -421,14 +506,29 @@ fn classify_claude_error(diagnostic: &str) -> LimitError {
     }
 }
 
+#[cfg(test)]
 async fn run_with_timeout(
     path: &Path,
     args: &[&str],
     timeout: Duration,
 ) -> Result<Vec<u8>, LimitError> {
+    run_filtered_with_timeout(path, args, timeout, None).await
+}
+
+async fn run_filtered_with_timeout(
+    path: &Path,
+    args: &[&str],
+    timeout: Duration,
+    provider: Option<&str>,
+) -> Result<Vec<u8>, LimitError> {
     // The same deadline covers process execution AND EOF, including inherited pipes.
     tokio::time::timeout(timeout, async {
         let mut command = crate::process::background_command(path);
+        if let Some(provider) = provider {
+            command
+                .command_mut()
+                .env("LIMITVIEW_OPENUSAGE_PROVIDER", provider);
+        }
         command
             .command_mut()
             .args(args)
