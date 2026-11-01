@@ -52,7 +52,7 @@ export type ProviderQuotaMap = Partial<Record<ToolKind, ProviderQuotaState | nul
 
 export interface AppUpdate {
   currentVersion: string;
-  latestVersion: string;
+  latestVersion: string | null;
   available: boolean;
   checkedAt: string;
 }

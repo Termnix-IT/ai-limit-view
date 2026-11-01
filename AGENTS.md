@@ -15,6 +15,7 @@
 - `npm run test:watch`: run Vitest in watch mode.
 - `npm run tauri dev`: run the Tauri desktop app in development mode.
 - `npm run tauri build`: build the Tauri app; the configured bundle target is `nsis`.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1`: build the signed installer, `latest.json`, and checksums for a GitHub Release; requires the updater key outside the repository (see README.md).
 - `cargo test`: run Rust tests from `src-tauri/`.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-prepare-openusage.ps1`: verify OpenUsage preparation with isolated fixtures and no network.
 
@@ -45,6 +46,7 @@
 - `get_provider_limits` accepts `codex` or `claude_code` and returns one provider. Keep polling guards independent and apply each result immediately.
 - Keep process-wrap's `KillOnDrop`, `CreationFlags(CREATE_NO_WINDOW)`, and `JobObject` together. Do not unwrap the child or bypass its job ownership. Bound all pipe I/O with the provider deadline.
 - When adding or renaming a Tauri command, update all three places: Rust command function, `tauri::generate_handler!`, and `src/api.ts`.
+- App updates run only through the Rust commands in `src-tauri/src/app_updates.rs`; do not grant `updater:*` capabilities to the frontend. Check and install only on explicit button presses. Never commit the updater private key or its password, and keep the `pubkey` in `tauri.conf.json` unless the key is intentionally rotated.
 - Do not reintroduce manual quotas or local token/time estimates as subscription quota data. Missing provider windows display `—`.
 - Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA HUD, circular ring hierarchy, large selected quota, blue Codex/orange Claude color roles, and inline rows with shared separators. Keep normal mode usable at 400x380 and its minimum 360x340.
 - Use `framer-motion` for existing ring/chip motion patterns instead of introducing another animation library.

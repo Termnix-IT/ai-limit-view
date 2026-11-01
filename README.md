@@ -21,7 +21,7 @@ Windows x64 向けのインストーラーは [GitHub Releases](https://github.c
 - Codex / Claude Code に加え Z.AI Coding Plan、Kimi Code、Command Code、OpenCode Go を選択可能。Antigravity CLI、GitHub Copilot、Cursor は取得条件付き
 - 暗色のHUDと罫線主体のサービス別表示。取得済みは緑のチェック、取得失敗は赤の警告アイコンで区別
 - 歯車ボタンで取得状況、取得元、確認時刻、各枠のリセット時刻を表示し、再取得可能
-- オプションボタンで現在のバージョンを表示し、公開版の更新を確認。配布ページを既定のブラウザーで開いて更新可能
+- オプションボタンで現在のバージョンを表示し、公開版の更新を確認。アプリ内で更新して再起動でき、配布ページも既定のブラウザーで開ける
 - Tauri の透明・非装飾ウィンドウとして動作
 
 ## Usage Model
@@ -44,9 +44,11 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 
 ## アプリの更新
 
-タイトルバーのスライダーアイコンから「オプション」を開き、「更新を確認」を押してください。現在のバージョンと GitHub Releases の公開版を比較し、新しい Windows x64 インストーラーがある場合に案内します。確認はボタンを押したときだけ行い、通信に失敗した場合は再試行できます。
+タイトルバーのスライダーアイコンから「オプション」を開き、「更新を確認」を押してください。GitHub Releases の公開版に新しいバージョンがある場合は「更新してアプリを再起動」が表示されます。押すとインストーラーをダウンロードして署名を検証し、アプリを終了してインストールしたあと、自動で再起動します。確認も更新もボタンを押したときだけ行い、バックグラウンドでは実行しません。
 
-「配布ページを開く」で最新版のページを既定のブラウザーに表示します。インストーラーを取得し、LimitView を終了してから実行してください。アプリが自動でダウンロード・インストールする機能はありません。同じ製品名の LimitView は既存のインストール先へ更新できます。
+アプリ内更新を使えるのは v0.1.16 以降です。それより前のバージョンからは、配布ページのインストーラーで一度だけ手動で更新してください。
+
+アプリ内で更新できない場合は、「配布ページを開く」で最新版のページを既定のブラウザーに表示し、インストーラーを取得して LimitView を終了してから実行してください。同じ製品名の LimitView は既存のインストール先へ更新できます。
 
 ## Tech Stack
 
@@ -101,6 +103,16 @@ Tauri app をビルドします。
 ```powershell
 npm run tauri build
 ```
+
+配布用のビルドには次のスクリプトを使います。`src-tauri/target/release/bundle/nsis/` に署名済みインストーラーと `latest.json`、`LimitView_<version>_SHA256SUMS.txt` を出力します。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
+```
+
+インストーラー、`latest.json`、チェックサムの3点を GitHub Release に添付すると、配布済みのアプリが `latest.json` から更新を検出します。prerelease と draft は対象になりません。
+
+アプリ内更新の署名には、Git管理外の `~/.tauri/limitview-updater.key` とパスワードファイル `~/.tauri/limitview-updater.password` を使います。配布済みのアプリは `src-tauri/tauri.conf.json` の公開鍵に対応する署名だけを受け付けるため、秘密鍵とパスワードを紛失すると、アプリ内更新を届けられなくなり、新しい公開鍵を入れた版を手動でインストールしてもらう必要があります。必ず別の安全な場所にもバックアップしてください。秘密鍵が漏えいした場合も同じ手順で鍵を交換します。
 
 ## Testing
 

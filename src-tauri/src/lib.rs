@@ -14,6 +14,7 @@ pub fn run() {
                 .open_js_links_on_click(false)
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_background_color(Some(tauri::webview::Color(0, 0, 0, 0)));
@@ -23,6 +24,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             live_limits::get_provider_limits,
             app_updates::check_app_update,
+            app_updates::install_app_update,
             app_updates::open_release_page
         ])
         .run(tauri::generate_context!())

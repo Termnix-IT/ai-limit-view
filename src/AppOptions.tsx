@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Check, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, Download, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
 import appIcon from "../src-tauri/icons/32x32.png";
 import { api } from "./api";
 import { formatDateTime } from "./date";
@@ -21,9 +21,12 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
   const [error, setError] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
   const mounted = useRef(false);
   const checkRunning = useRef(false);
   const openRunning = useRef(false);
+  const installRunning = useRef(false);
 
   useEffect(() => {
     mounted.current = true;
@@ -38,6 +41,7 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
     setChecking(true);
     setError(null);
     setResult(null);
+    setInstallError(null);
     try {
       const update = await api.checkAppUpdate();
       if (mounted.current) { setResult(update); setVersion(update.currentVersion); }
@@ -46,6 +50,21 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
     } finally {
       checkRunning.current = false;
       if (mounted.current) setChecking(false);
+    }
+  }
+
+  async function installUpdate() {
+    if (installRunning.current) return;
+    installRunning.current = true;
+    setInstalling(true);
+    setInstallError(null);
+    // On success the installer exits and restarts the app, so only failure returns here.
+    try { await api.installAppUpdate(); }
+    catch (cause) {
+      if (mounted.current) setInstallError(typeof cause === "string" ? cause : "更新をインストールできませんでした。配布ページからインストーラーを取得してください。");
+    } finally {
+      installRunning.current = false;
+      if (mounted.current) setInstalling(false);
     }
   }
 
@@ -108,7 +127,7 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
         <h2 id="app-updates-heading">アプリの更新</h2>
         <p>GitHub Releases の最新版を確認します。</p>
         <button type="button" className="refreshButton" aria-label="更新を確認" aria-busy={checking}
-          disabled={checking} onClick={() => void checkUpdate()}>
+          disabled={checking || installing} onClick={() => void checkUpdate()}>
           {checking ? <LoaderCircle size={12} className="appOptions__spinner" /> : <RefreshCw size={12} />}
           {checking ? "確認中…" : "更新を確認"}
         </button>
@@ -116,15 +135,22 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
           {checking ? <p>更新情報を取得しています…</p> : error ? <p><TriangleAlert size={13} />{error}</p> : result ? <>
             <p>{result.available ? <RefreshCw size={13} /> : <Check size={13} />}
               {result.available ? `v${result.latestVersion} が公開されています。` : "新しい更新はありません。"}</p>
-            <span>公開版 v{result.latestVersion} · 確認 {formatDateTime(result.checkedAt)}</span>
+            <span>確認 {formatDateTime(result.checkedAt)}</span>
           </> : null}
         </div>
+        {result?.available && !checking ? <button type="button" className="refreshButton" aria-busy={installing}
+          disabled={installing} onClick={() => void installUpdate()}>
+          {installing ? <LoaderCircle size={12} className="appOptions__spinner" /> : <Download size={12} />}
+          {installing ? "更新中…" : "更新してアプリを再起動"}
+        </button> : null}
+        {installing ? <p role="status">ダウンロードとインストールが終わると、アプリは自動で再起動します。</p> : null}
+        {installError ? <p className="appOptions__error" role="alert">{installError}</p> : null}
       </section>
       <footer className="appOptions__footer">
         <button type="button" className="refreshButton" disabled={opening} onClick={() => void openReleasePage()}>
           <ExternalLink size={12} />配布ページを開く
         </button>
-        <p>更新する場合は配布ページからインストーラーを取得してください。</p>
+        <p>アプリ内で更新できない場合は、配布ページからインストーラーを取得してください。</p>
         {openError ? <p className="appOptions__error" role="alert">{openError}</p> : null}
       </footer>
     </div>

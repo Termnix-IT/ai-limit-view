@@ -8,6 +8,9 @@ export const api = {
   checkAppUpdate() {
     return invoke<AppUpdate>("check_app_update");
   },
+  installAppUpdate() {
+    return invoke<void>("install_app_update");
+  },
   openReleasePage() {
     return invoke<void>("open_release_page");
   },
