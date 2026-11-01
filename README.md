@@ -66,9 +66,9 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 - 利用するサービスのログイン・連携設定
 - Go（同梱OpenUsageの初回ビルド・再ビルド時）
 
-OpenUsage 0.26.1 に取得前のサービスフィルターを加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。LLMDashboard の起動や、配布アプリ利用者による Go の導入は不要です。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
+OpenUsage 0.26.1 に取得前のサービスフィルターと Claude Code のセッションログ解析の省略を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。LLMDashboard の起動や、配布アプリ利用者による Go の導入は不要です。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
 
-初回は固定版の公式ソース、Goの依存関係・必要なGo toolchain、Cコンパイラーとして公式のポータブル Zig 0.16.0 を取得します。ソースとZigのアーカイブはSHA-256で検証し、コンパイラーとキャッシュはGit管理外の `.openusage-build/` に配置します。再ビルドには `scripts/prepare-openusage.ps1 -ForceRebuild` を使用します。フィルターとそのテストの変更を検知して再ビルドし、再利用時は同梱実行ファイルのチェックサムを検証します。
+初回は固定版の公式ソース、Goの依存関係・必要なGo toolchain、Cコンパイラーとして公式のポータブル Zig 0.16.0 を取得します。ソースとZigのアーカイブはSHA-256で検証し、コンパイラーとキャッシュはGit管理外の `.openusage-build/` に配置します。再ビルドには `scripts/prepare-openusage.ps1 -ForceRebuild` を使用します。これらのパッチとそのテストの変更を検知して再ビルドし、再利用時は同梱実行ファイルのチェックサムを検証します。
 
 ## Development
 

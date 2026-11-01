@@ -5,9 +5,10 @@ $scripts = Join-Path $fixtureRoot 'scripts'
 $buildRoot = Join-Path $fixtureRoot '.openusage-build'
 $upstream = Join-Path $fixtureRoot 'fixtures/openusage-0.26.1'
 $zigFixture = Join-Path $fixtureRoot 'fixtures/zig-x86_64-windows-0.16.0'
-New-Item -ItemType Directory -Force -Path $scripts, $buildRoot, (Join-Path $scripts 'openusage'), (Join-Path $upstream 'internal/export'), $zigFixture, (Join-Path $fixtureRoot 'src-tauri/binaries') | Out-Null
+New-Item -ItemType Directory -Force -Path $scripts, $buildRoot, (Join-Path $scripts 'openusage'), (Join-Path $upstream 'internal/export'), (Join-Path $upstream 'internal/providers/claude_code'), $zigFixture, (Join-Path $fixtureRoot 'src-tauri/binaries') | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $upstream 'go.mod'), 'module fixture')
 [System.IO.File]::WriteAllText((Join-Path $upstream 'internal/export/direct.go'), 'accounts := c.resolveAccts(&cfg)')
+[System.IO.File]::WriteAllText((Join-Path $upstream 'internal/providers/claude_code/claude_code.go'), 'if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {')
 [System.IO.File]::WriteAllText((Join-Path $zigFixture 'zig.exe'), 'fixture compiler')
 $sourceZip = Join-Path $fixtureRoot 'source-fixture.zip'
 $zigZip = Join-Path $fixtureRoot 'zig-fixture.zip'
@@ -20,7 +21,7 @@ $source = [regex]::Replace($source, '(?m)^\$sourceHash = ''[A-F0-9]{64}''', ('$$
 $source = [regex]::Replace($source, '(?m)^\$zigHash = ''[A-F0-9]{64}''', ('$$zigHash = ''' + $zigHash + ''''))
 $scriptPath = Join-Path $scripts 'prepare-openusage.ps1'
 [System.IO.File]::WriteAllText($scriptPath, $source)
-foreach ($file in @('limitview_filter.go', 'limitview_filter_test.go')) {
+foreach ($file in @('limitview_filter.go', 'limitview_filter_test.go', 'limitview_claude.go', 'limitview_claude_test.go')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "openusage/$file") -Destination (Join-Path $scripts "openusage/$file")
 }
 $fixtureCounters = @{ downloads = 0; tests = 0; builds = 0; failBuild = $false }
@@ -33,6 +34,7 @@ function go {
     if ($arguments[0] -eq 'test') {
         $fixtureCounters.tests++
         if (![System.IO.File]::ReadAllText((Join-Path (Get-Location) 'internal/export/direct.go')).Contains('limitviewProviderAccounts(c.resolveAccts(&cfg))')) { throw 'Provider filter must be installed before tests.' }
+        if (![System.IO.File]::ReadAllText((Join-Path (Get-Location) 'internal/providers/claude_code/claude_code.go')).Contains('p.limitviewReadConversationJSONL(')) { throw 'Claude scan patch must be installed before tests.' }
     } else {
         $fixtureCounters.builds++
         if ($fixtureCounters.failBuild) { throw 'fixture compiler failure' }

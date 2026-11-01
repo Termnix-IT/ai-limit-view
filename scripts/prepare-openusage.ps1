@@ -20,9 +20,11 @@ function Get-VerifiedArchive([string]$url, [string]$path, [string]$hash) {
 }
 $filterHash = Get-Sha256 (Join-Path $patchRoot 'limitview_filter.go')
 $testHash = Get-Sha256 (Join-Path $patchRoot 'limitview_filter_test.go')
+$claudeHash = Get-Sha256 (Join-Path $patchRoot 'limitview_claude.go')
+$claudeTestHash = Get-Sha256 (Join-Path $patchRoot 'limitview_claude_test.go')
 if (!$ForceRebuild -and (Test-Path -LiteralPath $destination) -and (Test-Path -LiteralPath $stampPath)) {
     $stamp = Get-Content -Raw -LiteralPath $stampPath | ConvertFrom-Json
-    if ($stamp.version -eq $version -and $stamp.sourceHash -eq $sourceHash -and $stamp.filterHash -eq $filterHash -and $stamp.testHash -eq $testHash) {
+    if ($stamp.version -eq $version -and $stamp.sourceHash -eq $sourceHash -and $stamp.filterHash -eq $filterHash -and $stamp.testHash -eq $testHash -and $stamp.claudeHash -eq $claudeHash -and $stamp.claudeTestHash -eq $claudeTestHash) {
         if ((Get-Sha256 $destination) -ne $stamp.binaryHash) { throw 'Bundled OpenUsage binary has an unexpected checksum.' }
         exit 0
     }
@@ -40,7 +42,8 @@ if (!(Test-Path -LiteralPath (Join-Path $source 'go.mod'))) { [System.IO.Compres
 $zigRoot = Join-Path $buildRoot 'toolchain'
 $zig = Join-Path $zigRoot 'zig-x86_64-windows-0.16.0/zig.exe'
 if (!(Test-Path -LiteralPath $zig)) { [System.IO.Compression.ZipFile]::ExtractToDirectory($zigArchive, $zigRoot) }
-# The only upstream behavior change is a fail-closed filter before provider Fetch.
+# Upstream behavior changes: a fail-closed filter before provider Fetch and no
+# Claude session log scan, which LimitView does not display.
 $directPath = Join-Path $source 'internal/export/direct.go'
 $direct = [System.IO.File]::ReadAllText($directPath)
 $original = 'accounts := c.resolveAccts(&cfg)'
@@ -48,8 +51,17 @@ $replacement = 'accounts := limitviewProviderAccounts(c.resolveAccts(&cfg))'
 if ($direct.Contains($original)) { $direct = $direct.Replace($original, $replacement) }
 elseif (!$direct.Contains($replacement)) { throw 'OpenUsage provider filter patch no longer matches the pinned source.' }
 [System.IO.File]::WriteAllText($directPath, $direct)
+$claudePath = Join-Path $source 'internal/providers/claude_code/claude_code.go'
+$claude = [System.IO.File]::ReadAllText($claudePath)
+$original = 'if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {'
+$replacement = 'if err := p.limitviewReadConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {'
+if ($claude.Contains($original)) { $claude = $claude.Replace($original, $replacement) }
+elseif (!$claude.Contains($replacement)) { throw 'OpenUsage Claude scan patch no longer matches the pinned source.' }
+[System.IO.File]::WriteAllText($claudePath, $claude)
 Copy-Item -LiteralPath (Join-Path $patchRoot 'limitview_filter.go') -Destination (Join-Path $source 'internal/export/limitview_filter.go') -Force
 Copy-Item -LiteralPath (Join-Path $patchRoot 'limitview_filter_test.go') -Destination (Join-Path $source 'internal/export/limitview_filter_test.go') -Force
+Copy-Item -LiteralPath (Join-Path $patchRoot 'limitview_claude.go') -Destination (Join-Path $source 'internal/providers/claude_code/limitview_claude.go') -Force
+Copy-Item -LiteralPath (Join-Path $patchRoot 'limitview_claude_test.go') -Destination (Join-Path $source 'internal/providers/claude_code/limitview_claude_test.go') -Force
 # Compiler and caches stay inside the checkout; no system installation.
 $compilerTemp = Join-Path $buildRoot 'tmp'
 New-Item -ItemType Directory -Force -Path $compilerTemp | Out-Null
@@ -64,13 +76,13 @@ $previous = @{}
 foreach ($name in $buildEnv.Keys) { $previous[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $buildEnv[$name], 'Process') }
 Push-Location $source
 try {
-    & go test ./internal/export -run '^TestLimitViewProviderFilter$' -count=1
-    if ($LASTEXITCODE -ne 0) { throw 'OpenUsage provider-filter tests failed.' }
+    & go test ./internal/export ./internal/providers/claude_code -run '^TestLimitView' -count=1
+    if ($LASTEXITCODE -ne 0) { throw 'OpenUsage LimitView patch tests failed.' }
     $builtBinary = Join-Path $buildRoot 'openusage-filtered.exe'
     & go build -trimpath -ldflags "-s -w -X github.com/janekbaraniewski/openusage/internal/version.Version=$version-limitview" -o $builtBinary ./cmd/openusage
     if ($LASTEXITCODE -ne 0) { throw 'OpenUsage build failed.' }
     Copy-Item -LiteralPath $builtBinary -Destination $destination -Force
-    @{ version = $version; sourceHash = $sourceHash; filterHash = $filterHash; testHash = $testHash; binaryHash = (Get-Sha256 $destination) } |
+    @{ version = $version; sourceHash = $sourceHash; filterHash = $filterHash; testHash = $testHash; claudeHash = $claudeHash; claudeTestHash = $claudeTestHash; binaryHash = (Get-Sha256 $destination) } |
         ConvertTo-Json | Set-Content -LiteralPath $stampPath -Encoding UTF8
 } finally {
     Pop-Location
