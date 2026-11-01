@@ -30,7 +30,7 @@ Windows x64 向けのインストーラーは [GitHub Releases](https://github.c
 
 Z.AI Coding Plan、Kimi Code、Command Code、OpenCode Go、Antigravity CLI、GitHub Copilot、Cursor は、OpenUsageの取得形式とテストデータに基づく対応です。**実契約アカウントでの残量取得は未検証**で、ログイン方式や契約・サービス側の変更により取得できない場合があります。Antigravity CLI、Copilot、Cursorには追加の条件があります。[仕様.md](./仕様.md) の「表示対象」を確認してください。
 
-自動テスト・配布ビルド・テストデータによる画面確認を実施しています。Windows実機でのドラッグ、ウィンドウの影、最前面表示の手動確認は未実施です。Claude Codeの認証自動復旧は、実際の認証期限切れから復旧する一連の動作を未検証です。CLI自身の認証更新に依存し、復旧できない場合は手動ログインが必要です。
+自動テスト・配布ビルド・テストデータによる画面確認を実施しています。Windows実機でのドラッグ、ウィンドウの影、最前面表示の手動確認は未実施です。Claude Codeの認証自動復旧は、実際の認証期限切れから復旧する一連の動作を未検証です。CLI自身の認証更新に依存し、復旧できない場合は手動ログインが必要です。リフレッシュトークンも期限切れだった環境では、CLIの起動後にローカルのログイン情報が空になる例を確認しています。
 
 Codex はインストール済みの `codex.exe app-server` の `account/rateLimits/read`、他のサービスはアプリに同梱した OpenUsage の `export --output - --source direct` から利用枠を読みます。Codex CLI は `%LOCALAPPDATA%\OpenAI\Codex\bin` 配下の新しい実行ファイルを優先し、見つからない場合は PATH と `%APPDATA%\npm` を探索します。npm版はパッケージ内のネイティブ実行ファイルを使用します。スタートメニューから起動した場合も、Codex デスクトップ版の CLI を検出します。利用するサービスへのログイン・OpenUsageの連携設定が必要です。条件は [仕様.md](./仕様.md) の「表示対象」を参照してください。同梱版は取得前にサービスを絞り込み、表示設定で選ばれたサービスだけを取得します。
 
