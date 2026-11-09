@@ -17,9 +17,12 @@ describe("display settings", () => {
   it("keeps the minimal ring size within 1-100 and the original size at 50", () => {
     expect([0, 1, 37.6, 100, 250, "80", Number.NaN, undefined].map((ringScale) => normalizeSettings({ version: 1, ringScale }).ringScale))
       .toEqual([1, 1, 38, 100, 100, 50, 50, 50]);
-    expect([50, 100, 25].map((scale) => [minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[180, 200], [360, 400], [90, 100]]);
-    // Smaller settings stop at a 72px ring so the readout and buttons stay usable.
-    expect([20, 1].map((scale) => [minimalRingZoom(scale), minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[0.4, 72, 80], [0.4, 72, 80]]);
+    expect([50, 100, 75].map((scale) => [minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[180, 200], [360, 400], [270, 300]]);
+    // 1-50% spans 72-180px, so 1% is the smallest usable ring and no setting is a dead value.
+    expect(minimalRingZoom(1)).toBe(0.4);
+    expect([1, 20, 25, 49].map((scale) => [minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[72, 80], [114, 127], [125, 139], [178, 198]]);
+    const sizes = Array.from({ length: 100 }, (_, index) => minimalRingPx(index + 1));
+    expect(sizes.every((size, index) => index === 0 || size > sizes[index - 1])).toBe(true);
   });
 
   it("does not substitute monthly subscription quota for a missing five-hour or weekly window", () => {

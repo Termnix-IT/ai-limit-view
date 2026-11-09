@@ -1,5 +1,7 @@
 // Minimal-mode ring size. 50% is the original 180px ring in a 200px window and
-// the size scales linearly, but never below a ring whose controls stay usable.
+// 100% doubles it. Below 50% the range is spread over 72-180px instead of
+// shrinking proportionally, so 1% is the smallest ring whose controls stay
+// usable and every setting still changes the size.
 export const DEFAULT_RING_SCALE = 50;
 export const MIN_RING_SCALE = 1;
 export const MAX_RING_SCALE = 100;
@@ -14,7 +16,10 @@ export function normalizeRingScale(value: unknown): number {
 
 /** Zoom factor applied to the 180px minimal ring layout. */
 export function minimalRingZoom(scale: number): number {
-  return Math.max(MIN_RING_PX / BASE_RING_PX, normalizeRingScale(scale) / DEFAULT_RING_SCALE);
+  const value = normalizeRingScale(scale);
+  if (value >= DEFAULT_RING_SCALE) return value / DEFAULT_RING_SCALE;
+  const minZoom = MIN_RING_PX / BASE_RING_PX;
+  return minZoom + (value - MIN_RING_SCALE) * (1 - minZoom) / (DEFAULT_RING_SCALE - MIN_RING_SCALE);
 }
 
 export function minimalRingPx(scale: number): number {

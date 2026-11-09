@@ -456,7 +456,16 @@ describe("App", () => {
     const slider = screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" });
     expect(slider).toHaveValue("50");
     expect(slider).toHaveAttribute("aria-valuetext", "50%（180px）");
+    const resetSize = screen.getByRole("button", { name: "50%に戻す" });
+    expect(resetSize).toBeDisabled();
     expect(screen.queryByTestId("ring-size-preview")).toBeNull();
+    fireEvent.change(slider, { target: { value: "10" } });
+    expect(slider).toHaveAttribute("aria-valuetext", "10%（92px）");
+    expect(resetSize).toBeEnabled();
+    await user.click(resetSize);
+    expect(slider).toHaveValue("50");
+    expect(resetSize).toBeDisabled();
+    expect(screen.getByTestId("ring-size-preview")).toHaveTextContent("実寸 180px");
     fireEvent.pointerDown(slider);
     fireEvent.change(slider, { target: { value: "100" } });
     const preview = screen.getByTestId("ring-size-preview");

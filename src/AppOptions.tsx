@@ -7,7 +7,7 @@ import { formatDateTime } from "./date";
 import type { AppUpdate } from "./types";
 import type { DisplaySettings, LimitScope, ToolKind } from "./types";
 import { DEFAULT_SETTINGS, PROVIDER_IDS, PROVIDERS } from "./providers";
-import { MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalWindowPx } from "./ringSize";
+import { DEFAULT_RING_SCALE, MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalWindowPx } from "./ringSize";
 
 const PREVIEW_HIDE_DELAY_MS = 1500;
 
@@ -31,18 +31,23 @@ function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: 
         <label htmlFor="ring-size">ミニマル表示のリングサイズ</label>
         <output htmlFor="ring-size">{scale}%<span>{ringPx}px</span></output>
       </div>
-      <input id="ring-size" type="range" min={MIN_RING_SCALE} max={MAX_RING_SCALE} step={1} value={scale}
-        aria-valuetext={`${scale}%（${ringPx}px）`}
-        onPointerDown={() => {
-          // The drag can end outside the slider, so listen on the window.
-          pointerHeld.current = true; showPreview();
-          window.addEventListener("pointerup", releasePointer, { once: true });
-          window.addEventListener("pointercancel", releasePointer, { once: true });
-        }}
-        onFocus={showPreview} onKeyDown={showPreview}
-        onBlur={() => { pointerHeld.current = false; window.clearTimeout(hideTimer.current); setPreviewing(false); }}
-        onChange={(event) => { showPreview(); onChange(Number(event.target.value)); }} />
-      <p className="displayOptions__hint">50%が従来の大きさです。操作できる大きさを保つため、72px未満にはなりません。</p>
+      <div className="displayOptions__ringSizeControl">
+        <input id="ring-size" type="range" min={MIN_RING_SCALE} max={MAX_RING_SCALE} step={1} value={scale}
+          aria-valuetext={`${scale}%（${ringPx}px）`}
+          onPointerDown={() => {
+            // The drag can end outside the slider, so listen on the window.
+            pointerHeld.current = true; showPreview();
+            window.addEventListener("pointerup", releasePointer, { once: true });
+            window.addEventListener("pointercancel", releasePointer, { once: true });
+          }}
+          onFocus={showPreview} onKeyDown={showPreview}
+          onBlur={() => { pointerHeld.current = false; window.clearTimeout(hideTimer.current); setPreviewing(false); }}
+          onChange={(event) => { showPreview(); onChange(Number(event.target.value)); }} />
+        <button type="button" className="refreshButton" disabled={scale === DEFAULT_RING_SCALE}
+          title="リングサイズを従来の大きさ（50%）に戻す"
+          onClick={() => { showPreview(); onChange(DEFAULT_RING_SCALE); }}>50%に戻す</button>
+      </div>
+      <p className="displayOptions__hint">1%で72px、50%で従来の180px、100%で2倍の360pxです。</p>
       {previewing ? <div className="ringPreview" data-testid="ring-size-preview" aria-hidden="true">
         <div className="ringPreview__window" style={{ width: windowPx, height: windowPx }}>
           <div className="ringPreview__ring" style={{ width: ringPx, height: ringPx }} />
