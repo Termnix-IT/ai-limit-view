@@ -68,7 +68,7 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 - 利用するサービスのログイン・連携設定
 - Go（同梱OpenUsageの初回ビルド・再ビルド時）
 
-OpenUsage 0.26.3 に取得前のサービスフィルターと Claude Code のセッションログ解析の省略を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。LLMDashboard の起動や、配布アプリ利用者による Go の導入は不要です。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
+OpenUsage 0.26.3 に取得前のサービスフィルターと Claude Code のセッションログ解析の省略を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。配布アプリの利用者が Go を導入する必要はありません。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
 
 初回は固定版の公式ソース、Goの依存関係・必要なGo toolchain、Cコンパイラーとして公式のポータブル Zig 0.16.0 を取得します。ソースとZigのアーカイブはSHA-256で検証し、コンパイラーとキャッシュはGit管理外の `.openusage-build/` に配置します。再ビルドには `scripts/prepare-openusage.ps1 -ForceRebuild` を使用します。これらのパッチとそのテストの変更を検知して再ビルドし、再利用時は同梱実行ファイルのチェックサムを検証します。
 
@@ -113,6 +113,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
 インストーラー、`latest.json`、チェックサムの3点を GitHub Release に添付すると、配布済みのアプリが `latest.json` から更新を検出します。prerelease と draft は対象になりません。
 
 アプリ内更新の署名には、Git管理外の `~/.tauri/limitview-updater.key` とパスワードファイル `~/.tauri/limitview-updater.password` を使います。配布済みのアプリは `src-tauri/tauri.conf.json` の公開鍵に対応する署名だけを受け付けるため、秘密鍵とパスワードを紛失すると、アプリ内更新を届けられなくなり、新しい公開鍵を入れた版を手動でインストールしてもらう必要があります。必ず別の安全な場所にもバックアップしてください。秘密鍵が漏えいした場合も同じ手順で鍵を交換します。
+
+### ビルドキャッシュの削除
+
+Git 管理外のビルド生成物は、開発を続けるとギガバイト単位に増えます。大半は Rust のビルド出力 `src-tauri/target/`（特に debug の incremental キャッシュ）と、同梱 OpenUsage のビルド入力 `.openusage-build/`（Go のモジュール・ビルドキャッシュ、Zig、ソース）です。`src-tauri/target/` は次のコマンドで削除できます。次回の Rust ビルドは最初からになり、`target/release/bundle/nsis/` の過去の配布用インストーラーも消えるため、必要なものは先に退避してください。
+
+```powershell
+cd src-tauri
+cargo clean
+```
+
+`.openusage-build/` は、`bundle.json` と `src-tauri/binaries/openusage.exe` が残っていれば、版や `scripts/openusage/` のパッチを変えない限り中身を使いません。不要になった旧版の `upstream/openusage-<旧version>/` と版名なしの `source.zip` はいつでも削除できます。`bundle.json` 以外をすべて削除した場合も、次に再ビルドが必要になったときに Go と通信環境を使って取得し直します。`go-mod/` は読み取り専用属性のファイルを含むため、`Remove-Item -Recurse -Force` で削除してください。
 
 ## Testing
 
