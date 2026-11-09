@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { LimitsSettings } from "./LimitsSettings";
@@ -7,7 +7,7 @@ import { ManaRing } from "./ManaRing";
 import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
 import { limitTooltip } from "./limits";
-import { applyQuotaResult, hasCachedQuota, refreshDelay } from "./quotaRefresh";
+import { applyQuotaResult, hasCachedQuota, refreshDelay, withoutExpiredQuota } from "./quotaRefresh";
 import { DEFAULT_SETTINGS, PROVIDER_IDS, normalizeSettings, selectedWindow } from "./providers";
 import { loadDisplaySettings, saveDisplaySettings } from "./displaySettings";
 import { minimalRingZoom, minimalWindowPx } from "./ringSize";
@@ -22,7 +22,7 @@ export function App() {
   const [saving, setSaving] = useState(false);
   const saveQueue = useRef(Promise.resolve());
   const saveRevision = useRef(0);
-  const [liveLimits, setLiveLimits] = useState<ProviderQuotaMap>({});
+  const [storedLimits, setStoredLimits] = useState<ProviderQuotaMap>({});
   const liveRefreshRunning = useRef<Partial<Record<ToolKind, boolean>>>({});
   const schedule = useRef(Object.fromEntries(PROVIDER_IDS.map((id) => [id, { nextAt: 0, cooldownUntil: 0, rateLimitFailures: 0 }])) as Record<ToolKind, { nextAt: number; cooldownUntil: number; rateLimitFailures: number }>);
   const mounted = useRef(false);
@@ -83,7 +83,7 @@ export function App() {
     liveRefreshRunning.current[provider] = false;
     if (!mounted.current) return;
     const nextRetryAt = result.status === "unavailable" ? new Date(timing.nextAt).toISOString() : null;
-    setLiveLimits((current) => ({ ...current, [provider]: applyQuotaResult(current[provider] ?? null, result, nextRetryAt) }));
+    setStoredLimits((current) => ({ ...current, [provider]: applyQuotaResult(current[provider] ?? null, result, nextRetryAt) }));
     setRefreshing(Object.values(liveRefreshRunning.current).some(Boolean));
   }, []);
 
@@ -118,6 +118,9 @@ export function App() {
     } catch (err) { setError(String(err)); }
   }, []);
 
+  // Re-evaluated every second with `now`, so expired source data disappears between polls.
+  const liveLimits = useMemo<ProviderQuotaMap>(() => Object.fromEntries(Object.entries(storedLimits)
+    .map(([id, provider]) => [id, withoutExpiredQuota(provider, now.getTime())])), [storedLimits, now]);
   const selectedProvider = liveLimits[activeRingTool] ?? null;
   const staleMessage = hasCachedQuota(selectedProvider) ? limitTooltip(selectedProvider, selectedWindow(selectedProvider, scope)) : null;
   const lastCheckedAt = settings.providers.map((id) => liveLimits[id]?.lastSuccessAt)

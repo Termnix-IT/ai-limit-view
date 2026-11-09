@@ -10,6 +10,7 @@ import { DEFAULT_SETTINGS, PROVIDER_IDS, PROVIDERS } from "./providers";
 import { DEFAULT_RING_SCALE, MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalWindowPx } from "./ringSize";
 
 const PREVIEW_HIDE_DELAY_MS = 1500;
+const INSTALL_POLL_MS = 2000;
 
 /** Slider for the minimal ring size with an actual-size frame shown while it is adjusted. */
 function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: number) => void }) {
@@ -82,7 +83,16 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
     mounted.current = true;
     void getVersion().then((value) => { if (mounted.current) setVersion(value); })
       .catch(() => { if (mounted.current) setVersion("取得できません"); });
-    return () => { mounted.current = false; };
+    // An install started before this panel was reopened keeps running in Rust.
+    let poll: number | undefined;
+    const syncInstalling = () => api.appUpdateInstalling().then((running) => {
+      if (!mounted.current || installRunning.current) return;
+      setInstalling(running);
+      window.clearTimeout(poll);
+      if (running) poll = window.setTimeout(() => void syncInstalling(), INSTALL_POLL_MS);
+    }).catch(() => {});
+    void syncInstalling();
+    return () => { mounted.current = false; window.clearTimeout(poll); };
   }, []);
 
   async function checkUpdate() {

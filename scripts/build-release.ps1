@@ -10,11 +10,19 @@ foreach ($path in @($KeyPath, $PasswordPath)) {
     if (!(Test-Path -LiteralPath $path)) { throw "Updater signing input not found: $path" }
 }
 $config = Join-Path ([System.IO.Path]::GetTempPath()) ("limitview-release-" + [guid]::NewGuid().ToString('N') + '.json')
-$previous = @{ key = $env:TAURI_SIGNING_PRIVATE_KEY; password = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD }
+$previous = @{ key = $env:TAURI_SIGNING_PRIVATE_KEY; password = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD; rustflags = $env:CARGO_ENCODED_RUSTFLAGS }
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
 Push-Location $root
 try {
     # Enabled only here so plain `npm run tauri build` keeps working without the key.
     [System.IO.File]::WriteAllText($config, '{"bundle":{"createUpdaterArtifacts":true}}')
+    # Panic locations embed absolute source paths, including the build user's name.
+    # The last matching prefix wins, so the home directory is only the fallback.
+    $env:CARGO_ENCODED_RUSTFLAGS = @(
+        "--remap-path-prefix=$HOME=~",
+        "--remap-path-prefix=$cargoHome=/cargo",
+        "--remap-path-prefix=$root=/limitview"
+    ) -join [char]0x1f
     $env:TAURI_SIGNING_PRIVATE_KEY = ([System.IO.File]::ReadAllText($KeyPath)).Trim()
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ([System.IO.File]::ReadAllText($PasswordPath)).Trim()
     & npm run tauri build -- --config $config
@@ -22,6 +30,7 @@ try {
 } finally {
     $env:TAURI_SIGNING_PRIVATE_KEY = $previous.key
     $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $previous.password
+    $env:CARGO_ENCODED_RUSTFLAGS = $previous.rustflags
     Remove-Item -LiteralPath $config -Force -ErrorAction SilentlyContinue
     Pop-Location
 }
@@ -31,6 +40,11 @@ $installer = Join-Path $bundle $installerName
 $signature = "$installer.sig"
 foreach ($path in @($installer, $signature)) {
     if (!(Test-Path -LiteralPath $path)) { throw "Release build output not found: $path" }
+}
+# Refuse to publish a binary that still reveals the build machine's home directory.
+$executable = Join-Path $root 'src-tauri/target/release/ai-limitusage-watcher.exe'
+if ([System.IO.File]::ReadAllText($executable, [System.Text.Encoding]::Default).Contains($HOME)) {
+    throw 'Release executable still contains the build user home path.'
 }
 $encoding = New-Object System.Text.UTF8Encoding($false)
 $manifest = [ordered]@{

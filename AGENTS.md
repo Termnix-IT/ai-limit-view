@@ -26,7 +26,7 @@
 - `src/ToolChipRail.tsx`: status rail for each provider's representative windows, retrieval status, and the selected scope reset countdown.
 - `src/AppOptions.tsx`: options panel for ring count, providers, colors, minimal ring size, initial scope, app version, and update buttons.
 - `src/providers.ts`: provider catalog (labels, default colors, notes), `DisplaySettings` defaults/normalization, and window selection per scope.
-- `src/displaySettings.ts`: Tauri Store persistence of `display-settings.json`.
+- `src/displaySettings.ts`: loads/saves display settings through the `load_display_settings` / `save_display_settings` commands.
 - `src/quotaRefresh.ts`: refresh intervals, rate-limit backoff, and keeping the last successful quota on transient errors.
 - `src/QuotaStatus.tsx`: shared retrieval status badge with icons and optional failure details action.
 - `src/ServiceMark.tsx`: decorative SVG provider marks for the inline rail headers.
@@ -42,9 +42,10 @@
 - `src-tauri/src/live_limits.rs`: `get_provider_limits`, Codex discovery and app-server RPC, OpenUsage execution, Claude parsing/error classification, and Claude auth recovery serialization.
 - `src-tauri/src/subscription_limits.rs`: OpenUsage snapshot parsing for the additional providers; only explicit subscription gauges are admitted.
 - `src-tauri/src/claude_auth.rs`: Claude Code CLI discovery and the hidden `/exit` auth refresh.
-- `src-tauri/src/app_updates.rs`: update check/install and release page commands.
+- `src-tauri/src/display_settings.rs`: fixed-file, fixed-key persistence of display settings via the Rust Store API.
+- `src-tauri/src/app_updates.rs`: update check/install (single install per process) and release page commands.
 - `src-tauri/src/process.rs`: hidden child process creation and Windows Job Object lifetime management via process-wrap for Codex, OpenUsage, and Claude Code.
-- `scripts/prepare-openusage.ps1`: downloads the pinned OpenUsage source and Zig, applies the `scripts/openusage/*.go` patches, and builds `src-tauri/binaries/openusage.exe`; runs automatically as `npm run pretauri`. Build inputs and caches live in `.openusage-build/` (ignored).
+- `scripts/prepare-openusage.ps1`: downloads the pinned OpenUsage source and Zig, extracts them fresh into `.openusage-build/work/` for every build, applies the anchored source edits listed in `$edits` plus the `scripts/openusage/*.go` overlays (registered in `$overlays`), runs their `TestLimitView*` tests, and builds `src-tauri/binaries/openusage.exe`; runs automatically as `npm run pretauri`. Build inputs and caches live in `.openusage-build/` (ignored).
 - `src-tauri/tauri.conf.json`: desktop window, dev server, build, and bundle settings; note `decorations: false` and `transparent: true`.
 - `src-tauri/icons/app-icon.png`: selected dual-ring app icon master. Use the existing Tauri CLI `icon` command to generate `icon.ico` and `32x32.png`; the latter is shared by the titlebar and browser favicon.
 
@@ -55,6 +56,7 @@
 - `get_provider_limits` accepts one `ToolKind` id (`codex`, `claude_code`, `zai`, `kimi_cli`, `command_code`, `opencode`, `antigravity`, `copilot`, `cursor`) and returns one provider. When adding a provider, update the Rust `Provider` enum, the Go filter allowlist in `scripts/openusage/limitview_filter.go`, `ToolKind`, `PROVIDERS`, and `REFRESH_INTERVAL`. Keep polling guards independent and apply each result immediately.
 - Keep process-wrap's `KillOnDrop`, `CreationFlags(CREATE_NO_WINDOW)`, and `JobObject` together. Do not unwrap the child or bypass its job ownership. Bound all pipe I/O with the provider deadline.
 - When adding or renaming a Tauri command, update all three places: Rust command function, `tauri::generate_handler!`, and `src/api.ts`.
+- Do not grant `store:*` or other filesystem-reaching plugin permissions to the frontend; the Store plugin accepts arbitrary paths. Add a fixed Rust command instead. Keep the production CSP in `tauri.conf.json` (`devCsp` stays `null` for Vite HMR) and keep `script-src` without inline scripts.
 - App updates run only through the Rust commands in `src-tauri/src/app_updates.rs`; do not grant `updater:*` capabilities to the frontend. Check and install only on explicit button presses. Never commit the updater private key or its password, and keep the `pubkey` in `tauri.conf.json` unless the key is intentionally rotated.
 - Do not reintroduce manual quotas or local token/time estimates as subscription quota data. Missing provider windows display `—`.
 - Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA HUD, circular ring hierarchy, large selected quota, default blue Codex/orange Claude color roles, and inline rows with shared separators. Keep normal mode usable at 400x380 and its minimum 360x340.

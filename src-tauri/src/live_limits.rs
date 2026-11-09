@@ -52,6 +52,8 @@ pub struct ProviderLimits {
     pub(crate) windows: Vec<SubscriptionWindow>,
     pub(crate) message: Option<&'static str>,
     pub(crate) error_code: Option<&'static str>,
+    /// When the provider's source data stops being valid, even as a cached value.
+    pub(crate) expires_at: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,11 +83,12 @@ pub(crate) enum LimitError {
     ProviderData,
     ProviderRateLimited,
     ProviderServer,
+    ProviderNetwork,
     ProviderStale,
 }
 
 impl LimitError {
-    fn code(self) -> &'static str {
+    pub(crate) fn code(self) -> &'static str {
         match self {
             Self::CodexNotFound => "codex_not_found",
             Self::OpenUsageNotFound => "openusage_not_found",
@@ -101,6 +104,7 @@ impl LimitError {
             Self::ProviderAuth => "auth_required",
             Self::ProviderData => "subscription_unavailable",
             Self::ProviderServer => "server_error",
+            Self::ProviderNetwork => "network_error",
             Self::ProviderStale => "stale_data",
             Self::ClaudeServer => "server_error",
             Self::ClaudeNetwork => "network_error",
@@ -137,6 +141,7 @@ impl LimitError {
             Self::ProviderData => "サブスクリプションの残量を取得できませんでした。契約と OpenUsage の連携を確認してください。追加購入分・API残高・未対応の契約枠は表示しません。",
             Self::ProviderRateLimited => "残量の取得頻度が制限されています。待機後に自動で再試行します。",
             Self::ProviderServer => "サービス側で取得エラーが発生しました。時間をおいて自動で再試行します。",
+            Self::ProviderNetwork => "サービスとの通信に失敗しました。接続・VPN・プロキシの状態を確認してください。時間をおいて自動で再試行します。",
             Self::ProviderStale => "Antigravity CLI からの残量情報が更新されていません。CLI を起動して statusline 連携を確認してください。",
         }
     }
@@ -218,6 +223,7 @@ pub(crate) fn provider_result(
         windows,
         message: error.map(LimitError::message),
         error_code: error.map(LimitError::code),
+        expires_at: None,
     }
 }
 
@@ -236,12 +242,7 @@ pub async fn get_provider_limits(app: tauri::AppHandle, provider: Provider) -> P
         .ok()
         .map(|path| path.join("binaries").join("openusage.exe"))
         .filter(|path| path.is_file())
-        .or_else(|| {
-            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("binaries")
-                .join("openusage.exe");
-            path.is_file().then_some(path)
-        });
+        .or_else(dev_openusage);
     if !matches!(provider, Provider::ClaudeCode) {
         return match openusage {
             Some(path) => match run_openusage(&path, provider.id())
@@ -281,6 +282,21 @@ pub async fn get_provider_limits(app: tauri::AppHandle, provider: Provider) -> P
         None => Err(LimitError::OpenUsageNotFound),
     };
     provider_result(result, "OpenUsage", LimitError::ClaudeData)
+}
+
+// Development builds may run before Tauri copies resources. Release builds must
+// not embed or search the build machine's source path.
+#[cfg(debug_assertions)]
+fn dev_openusage() -> Option<PathBuf> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join("openusage.exe");
+    path.is_file().then_some(path)
+}
+
+#[cfg(not(debug_assertions))]
+fn dev_openusage() -> Option<PathBuf> {
+    None
 }
 
 fn find_codex(
@@ -559,18 +575,7 @@ fn classify_claude_error(diagnostic: &str) -> LimitError {
     let diagnostic = diagnostic
         .rsplit_once("; oauth: ")
         .map_or(diagnostic, |(_, oauth)| oauth);
-    // Match explicit HTTP markers, not arbitrary numbers or words in response bodies.
-    let status = ["api returned ", "http status ", "http ", "status code "]
-        .iter()
-        .find_map(|marker| {
-            let rest = diagnostic.split_once(marker)?.1;
-            let code = rest.get(..3)?;
-            if rest.as_bytes().get(3).is_some_and(u8::is_ascii_digit) {
-                return None;
-            }
-            code.parse::<u16>().ok()
-        });
-    if let Some(status) = status {
+    if let Some(status) = http_status(diagnostic) {
         return match status {
             401 | 403 => LimitError::ClaudeAuthRejected,
             429 => LimitError::ClaudeRateLimited,
@@ -587,21 +592,48 @@ fn classify_claude_error(diagnostic: &str) -> LimitError {
         || diagnostic == "credentials not found"
     {
         LimitError::ClaudeAuthRequired
-    } else if diagnostic.contains("api request failed")
-        || diagnostic.contains("connection refused")
-        || diagnostic.contains("connection reset")
-        || diagnostic.contains("no such host")
-        || diagnostic.contains("tls handshake")
-        || diagnostic.contains("context deadline exceeded")
-        || diagnostic.contains("timeout")
-        || diagnostic.contains("timed out")
-    {
+    } else if diagnostic.contains("api request failed") || is_network_error(diagnostic) {
         LimitError::ClaudeNetwork
     } else if diagnostic.is_empty() {
         LimitError::ClaudeData
     } else {
         LimitError::ClaudeApi
     }
+}
+
+/// Reads a status code only after an explicit HTTP marker, never from arbitrary
+/// numbers in response bodies, IDs or timestamps. Expects lowercase input.
+pub(crate) fn http_status(diagnostic: &str) -> Option<u16> {
+    ["api returned ", "http status ", "http ", "status code "]
+        .iter()
+        .find_map(|marker| {
+            let rest = diagnostic.split_once(marker)?.1;
+            let code = rest.get(..3)?;
+            if rest.as_bytes().get(3).is_some_and(u8::is_ascii_digit) {
+                return None;
+            }
+            code.parse::<u16>()
+                .ok()
+                .filter(|code| (100..=599).contains(code))
+        })
+}
+
+/// Transport failures that are worth retrying. Expects lowercase input.
+pub(crate) fn is_network_error(diagnostic: &str) -> bool {
+    [
+        "connection refused",
+        "connection reset",
+        "no such host",
+        "tls handshake",
+        "context deadline exceeded",
+        "timeout",
+        "timed out",
+        "dial tcp",
+        "network is unreachable",
+        "unexpected eof",
+    ]
+    .iter()
+    .any(|marker| diagnostic.contains(marker))
 }
 
 #[cfg(test)]

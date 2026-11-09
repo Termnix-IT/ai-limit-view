@@ -1,23 +1,13 @@
-import { load } from "@tauri-apps/plugin-store";
+import { api } from "./api";
 import { normalizeSettings } from "./providers";
 import type { DisplaySettings } from "./types";
 
-let storePromise: ReturnType<typeof load> | null = null;
-function settingsStore() {
-  if (!storePromise) storePromise = load("display-settings.json", { autoSave: false, defaults: {} }).catch((error: unknown) => {
-    storePromise = null;
-    throw error;
-  });
-  return storePromise;
-}
-
+// Persisted by fixed Rust commands in display-settings.json; the frontend has no
+// generic file or Store access.
 export async function loadDisplaySettings(): Promise<DisplaySettings> {
-  const store = await settingsStore();
-  return normalizeSettings(await store.get<unknown>("display"));
+  return normalizeSettings(await api.loadDisplaySettings());
 }
 
 export async function saveDisplaySettings(settings: DisplaySettings): Promise<void> {
-  const store = await settingsStore();
-  await store.set("display", normalizeSettings(settings));
-  await store.save();
+  await api.saveDisplaySettings(normalizeSettings(settings));
 }

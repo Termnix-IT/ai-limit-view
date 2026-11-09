@@ -68,7 +68,7 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 - 利用するサービスのログイン・連携設定
 - Go（同梱OpenUsageの初回ビルド・再ビルド時）
 
-OpenUsage 0.26.3 に取得前のサービスフィルターと Claude Code のセッションログ解析の省略を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。配布アプリの利用者が Go を導入する必要はありません。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
+OpenUsage 0.26.3 に、取得前のサービスフィルター、Claude Code と Kimi Code のセッションログ解析の省略、自動検出結果を OpenUsage の設定ファイルへ保存しない変更、OpenCode のブラウザーCookie取り込みを OpenCode Go の取得時に限る変更を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。配布アプリの利用者が Go を導入する必要はありません。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
 
 初回は固定版の公式ソース、Goの依存関係・必要なGo toolchain、Cコンパイラーとして公式のポータブル Zig 0.16.0 を取得します。ソースとZigのアーカイブはSHA-256で検証し、コンパイラーとキャッシュはGit管理外の `.openusage-build/` に配置します。再ビルドには `scripts/prepare-openusage.ps1 -ForceRebuild` を使用します。これらのパッチとそのテストの変更を検知して再ビルドし、再利用時は同梱実行ファイルのチェックサムを検証します。
 
@@ -104,7 +104,7 @@ Tauri app をビルドします。
 npm run tauri build
 ```
 
-配布用のビルドには次のスクリプトを使います。`src-tauri/target/release/bundle/nsis/` に署名済みインストーラーと `latest.json`、`LimitView_<version>_SHA256SUMS.txt` を出力します。
+配布用のビルドには次のスクリプトを使います。`src-tauri/target/release/bundle/nsis/` に署名済みインストーラーと `latest.json`、`LimitView_<version>_SHA256SUMS.txt` を出力します。依存クレートのパニック位置などに含まれるビルド環境の絶対パスは `--remap-path-prefix` で置き換え、実行ファイルにホームディレクトリのパスが残っている場合は失敗します。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1
@@ -123,7 +123,7 @@ cd src-tauri
 cargo clean
 ```
 
-`.openusage-build/` は、`bundle.json` と `src-tauri/binaries/openusage.exe` が残っていれば、版や `scripts/openusage/` のパッチを変えない限り中身を使いません。不要になった旧版の `upstream/openusage-<旧version>/` と版名なしの `source.zip` はいつでも削除できます。`bundle.json` 以外をすべて削除した場合も、次に再ビルドが必要になったときに Go と通信環境を使って取得し直します。`go-mod/` は読み取り専用属性のファイルを含むため、`Remove-Item -Recurse -Force` で削除してください。
+`.openusage-build/` は、`bundle.json` と `src-tauri/binaries/openusage.exe` が残っていれば、版や `scripts/openusage/` のパッチを変えない限り中身を使いません。再ビルドのたびに検証済みアーカイブから `work/` へ展開し直し、ビルド後に `work/` を削除します。旧版のアーカイブと以前の配置（`upstream/`、`toolchain/`、`source.zip`）も再ビルド時に自動で削除します。`bundle.json` 以外をすべて削除した場合も、次に再ビルドが必要になったときに Go と通信環境を使って取得し直します。`go-mod/` は読み取り専用属性のファイルを含むため、`Remove-Item -Recurse -Force` で削除してください。
 
 ## Testing
 
@@ -148,7 +148,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-prepare-openusa
 
 ## Data Storage
 
-表示設定（リング数・サービス・配色・ミニマル表示のリングサイズ・初期表示枠）はアプリデータの `display-settings.json` に保存します。利用枠の取得結果と操作中の選択はメモリ上だけに保持し、再起動時は保存した初期表示枠から表示します。設定ファイルには認証情報や利用履歴を保存しません。
+表示設定（リング数・サービス・配色・ミニマル表示のリングサイズ・初期表示枠）はアプリデータの `display-settings.json` に保存します。利用枠の取得結果と操作中の選択はメモリ上だけに保持し、再起動時は保存した初期表示枠から表示します。設定ファイルには認証情報や利用履歴を保存しません。画面側からは、Rust の固定コマンドを通してこの設定値だけを読み書きでき、任意のファイルへアクセスする Store の権限は与えていません。
 
 旧バージョンの手入力、履歴記録、プロセス監視、ローカル推定用の API と保存処理は廃止しました。以前の app data directory にある `ai-limitusage-watcher.db` は既存データの保管用として残り、現在のアプリから読み書きしません。
 

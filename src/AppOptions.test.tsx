@@ -7,7 +7,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import type { AppUpdate } from "./types";
 
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn() }));
-vi.mock("./api", () => ({ api: { checkAppUpdate: vi.fn(), installAppUpdate: vi.fn(), openReleasePage: vi.fn() } }));
+vi.mock("./api", () => ({ api: { checkAppUpdate: vi.fn(), installAppUpdate: vi.fn(), appUpdateInstalling: vi.fn(), openReleasePage: vi.fn() } }));
 
 const checked: AppUpdate = { currentVersion: "0.1.12", latestVersion: null, available: false, checkedAt: "2026-10-01T00:00:00Z" };
 
@@ -16,7 +16,23 @@ describe("AppOptions", () => {
     vi.mocked(getVersion).mockReset().mockResolvedValue("0.1.12");
     vi.mocked(api.checkAppUpdate).mockReset().mockResolvedValue(checked);
     vi.mocked(api.installAppUpdate).mockReset().mockResolvedValue(undefined);
+    vi.mocked(api.appUpdateInstalling).mockReset().mockResolvedValue(false);
     vi.mocked(api.openReleasePage).mockReset().mockResolvedValue(undefined);
+  });
+
+  it("keeps blocking update actions when reopened during an install started earlier", async () => {
+    vi.useFakeTimers();
+    vi.mocked(api.appUpdateInstalling).mockResolvedValue(true);
+    const view = render(<AppOptions />);
+    try {
+      await act(async () => {});
+      expect(screen.getByRole("button", { name: "更新を確認" })).toBeDisabled();
+      expect(screen.getByText(/自動で再起動します/)).toBeInTheDocument();
+      vi.mocked(api.appUpdateInstalling).mockResolvedValue(false);
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(screen.getByRole("button", { name: "更新を確認" })).toBeEnabled();
+      expect(screen.queryByText(/自動で再起動します/)).toBeNull();
+    } finally { view.unmount(); vi.useRealTimers(); }
   });
 
   it("displays the installed version without automatically checking releases", async () => {

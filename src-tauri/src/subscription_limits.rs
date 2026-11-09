@@ -1,5 +1,6 @@
 use crate::live_limits::{
-    window, LimitError, LimitWindow, Provider, ProviderLimits, SubscriptionWindow,
+    http_status, is_network_error, window, LimitError, LimitWindow, Provider, ProviderLimits,
+    SubscriptionWindow,
 };
 use serde_json::Value;
 
@@ -33,6 +34,10 @@ pub(crate) fn parse(provider: Provider, output: &[u8]) -> Result<ProviderLimits,
                     windows,
                     message: None,
                     error_code: None,
+                    expires_at: matches!(provider, Provider::Antigravity)
+                        .then(|| antigravity_timestamp(snapshot))
+                        .flatten()
+                        .map(|timestamp| (timestamp + ANTIGRAVITY_MAX_AGE).to_rfc3339()),
                 });
             }
             Err(error) => {
@@ -180,14 +185,20 @@ fn metric_window(metric: &Value, reset: Option<Value>) -> Option<LimitWindow> {
     window(Some(used / limit * 100.0), reset)
 }
 
-fn antigravity_windows(snapshot: &Value) -> Result<Vec<SubscriptionWindow>, LimitError> {
-    let timestamp = snapshot
+// Antigravity data comes from a statusline cache, not a live API call.
+const ANTIGRAVITY_MAX_AGE: chrono::Duration = chrono::Duration::minutes(5);
+
+fn antigravity_timestamp(snapshot: &Value) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    snapshot
         .get("timestamp")
         .and_then(Value::as_str)
         .and_then(|text| chrono::DateTime::parse_from_rfc3339(text).ok())
-        .ok_or(LimitError::ProviderData)?;
+}
+
+fn antigravity_windows(snapshot: &Value) -> Result<Vec<SubscriptionWindow>, LimitError> {
+    let timestamp = antigravity_timestamp(snapshot).ok_or(LimitError::ProviderData)?;
     let age = chrono::Utc::now().signed_duration_since(timestamp);
-    if age > chrono::Duration::minutes(5) || age < chrono::Duration::minutes(-5) {
+    if age > ANTIGRAVITY_MAX_AGE || age < -ANTIGRAVITY_MAX_AGE {
         return Err(LimitError::ProviderStale);
     }
     let metrics = snapshot
@@ -209,29 +220,36 @@ fn antigravity_windows(snapshot: &Value) -> Result<Vec<SubscriptionWindow>, Limi
 }
 
 fn classify(snapshot: &Value) -> LimitError {
+    // The summary message often carries the HTTP status; diagnostics carry details.
+    // Neither is shown to the user, only the resulting classification.
     let diagnostic = snapshot
         .get("diagnostics")
         .and_then(Value::as_object)
-        .map(|items| {
-            items
-                .values()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(" ")
-                .to_ascii_lowercase()
-        })
-        .unwrap_or_default();
-    if diagnostic.contains("429") || diagnostic.contains("rate limit") {
+        .into_iter()
+        .flat_map(|items| items.values())
+        .chain(snapshot.get("message"))
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    if let Some(status) = http_status(&diagnostic) {
+        return match status {
+            401 | 403 => LimitError::ProviderAuth,
+            429 => LimitError::ProviderRateLimited,
+            500..=599 => LimitError::ProviderServer,
+            _ => LimitError::ProviderData,
+        };
+    }
+    if diagnostic.contains("rate limit") || diagnostic.contains("too many requests") {
         LimitError::ProviderRateLimited
-    } else if diagnostic.contains("401")
-        || diagnostic.contains("403")
+    } else if diagnostic.contains("unauthorized")
+        || diagnostic.contains("forbidden")
         || diagnostic.contains("expired")
         || diagnostic.contains("credentials")
     {
         LimitError::ProviderAuth
-    } else if diagnostic.contains("500") || diagnostic.contains("502") || diagnostic.contains("503")
-    {
-        LimitError::ProviderServer
+    } else if is_network_error(&diagnostic) {
+        LimitError::ProviderNetwork
     } else {
         LimitError::ProviderData
     }
@@ -362,11 +380,70 @@ mod tests {
         let result = parse_one(Provider::Antigravity, snapshot.clone()).unwrap();
         assert_eq!(result.windows[0].limit.remaining_percent, 72.0);
         assert!(result.windows[0].limit.resets_at.is_none());
+        let expires = chrono::DateTime::parse_from_rfc3339(result.expires_at.as_deref().unwrap())
+            .unwrap()
+            .signed_duration_since(chrono::Utc::now());
+        assert!(expires > chrono::Duration::minutes(4) && expires <= ANTIGRAVITY_MAX_AGE);
         snapshot["timestamp"] =
             json!((chrono::Utc::now() - chrono::Duration::minutes(6)).to_rfc3339());
         assert_eq!(
             parse_one(Provider::Antigravity, snapshot).unwrap_err(),
             LimitError::ProviderStale
+        );
+    }
+
+    #[test]
+    fn only_antigravity_reports_source_expiry() {
+        let result = parse_one(
+            Provider::Zai,
+            json!({"provider_id": "zai", "timestamp": chrono::Utc::now().to_rfc3339(),
+                "metrics": {"usage_five_hour": {"used": 20, "unit": "%"}}}),
+        )
+        .unwrap();
+        assert!(result.expires_at.is_none());
+    }
+
+    #[test]
+    fn classifies_errors_from_message_and_diagnostics_without_loose_numbers() {
+        let error = |snapshot: Value| {
+            let mut snapshot = snapshot;
+            snapshot["provider_id"] = json!("kimi_cli");
+            snapshot["status"] = json!("ERROR");
+            parse_one(Provider::KimiCli, snapshot).unwrap_err()
+        };
+        for (snapshot, expected) in [
+            (
+                json!({"message": "HTTP 429 – check API key"}),
+                LimitError::ProviderRateLimited,
+            ),
+            (
+                json!({"message": "HTTP 401 – check API key"}),
+                LimitError::ProviderAuth,
+            ),
+            (
+                json!({"diagnostics": {"subscription_error": "kimi_cli: usages: HTTP 503"}}),
+                LimitError::ProviderServer,
+            ),
+            (
+                json!({"diagnostics": {"subscription_error": "Get \"https://x\": dial tcp: lookup x: no such host"}}),
+                LimitError::ProviderNetwork,
+            ),
+            (
+                json!({"diagnostics": {"subscription_error": "context deadline exceeded"}}),
+                LimitError::ProviderNetwork,
+            ),
+            (
+                json!({"message": "account 40123 has no plan; request 5002 failed"}),
+                LimitError::ProviderData,
+            ),
+            (json!({"message": "HTTP 404"}), LimitError::ProviderData),
+        ] {
+            assert_eq!(error(snapshot.clone()), expected, "{snapshot}");
+        }
+        assert_eq!(
+            LimitError::ProviderNetwork.code(),
+            "network_error",
+            "network failures must stay transient in the UI"
         );
     }
 }

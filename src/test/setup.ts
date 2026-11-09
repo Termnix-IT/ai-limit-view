@@ -1,12 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, vi } from "vitest";
+import { settingsStore } from "./settingsStore";
 
-const stored = new Map<string, unknown>();
-vi.mock("@tauri-apps/plugin-store", () => ({
-  load: async () => ({
-    get: async (key: string) => stored.get(key),
-    set: async (key: string, value: unknown) => { stored.set(key, structuredClone(value)); },
-    save: async () => {},
-  }),
-}));
-beforeEach(() => stored.clear());
+vi.mock("../displaySettings", async () => {
+  const { normalizeSettings } = await import("../providers");
+  return {
+    loadDisplaySettings: async () => normalizeSettings(settingsStore.get()),
+    saveDisplaySettings: async (settings: unknown) => { settingsStore.set(normalizeSettings(settings)); },
+  };
+});
+beforeEach(() => settingsStore.clear());

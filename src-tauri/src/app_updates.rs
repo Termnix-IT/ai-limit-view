@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -46,8 +47,38 @@ pub async fn check_app_update(app: tauri::AppHandle) -> Result<AppUpdate, String
     ))
 }
 
+const INSTALL_RUNNING: &str =
+    "更新を実行中です。ダウンロードとインストールが終わるまでお待ちください。";
+
+// One install per app process: the options panel can be closed and reopened
+// while a download is still running, which drops the UI's own guard.
+static INSTALLING: AtomicBool = AtomicBool::new(false);
+
+struct InstallGuard;
+
+impl InstallGuard {
+    fn acquire() -> Option<Self> {
+        INSTALLING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self)
+    }
+}
+
+impl Drop for InstallGuard {
+    fn drop(&mut self) {
+        INSTALLING.store(false, Ordering::Release);
+    }
+}
+
+#[tauri::command]
+pub fn app_update_installing() -> bool {
+    INSTALLING.load(Ordering::Acquire)
+}
+
 #[tauri::command]
 pub async fn install_app_update(app: tauri::AppHandle) -> Result<(), String> {
+    let _guard = InstallGuard::acquire().ok_or(INSTALL_RUNNING)?;
     // The plugin verifies the signature before running the installer. On Windows the
     // installer exits this app and restarts it, so success does not return to the UI.
     let update = app
@@ -86,6 +117,16 @@ mod tests {
         assert_eq!(value["currentVersion"], "0.1.12");
         assert_eq!(value["latestVersion"], "0.1.13");
         assert!(value["checkedAt"].is_string());
+    }
+
+    #[test]
+    fn install_guard_allows_one_install_and_releases_on_failure() {
+        let first = InstallGuard::acquire().expect("first install starts");
+        assert!(app_update_installing());
+        assert!(InstallGuard::acquire().is_none());
+        drop(first);
+        assert!(!app_update_installing());
+        assert!(InstallGuard::acquire().is_some());
     }
 
     #[test]

@@ -32,22 +32,14 @@ export interface LiveProviderLimits {
   windows?: SubscriptionWindow[];
   message: string | null;
   errorCode: string | null;
-}
-
-export interface LiveLimits {
-  codex: LiveProviderLimits | null;
-  claude: LiveProviderLimits | null;
+  /** Time after which the provider's source data must not be shown, even as a cached value. */
+  expiresAt?: string | null;
 }
 
 // Frontend state only; the Tauri response remains LiveProviderLimits.
 export interface ProviderQuotaState extends LiveProviderLimits {
   lastSuccessAt: string | null;
   nextRetryAt: string | null;
-}
-
-export interface LiveQuotaState {
-  codex: ProviderQuotaState | null;
-  claude: ProviderQuotaState | null;
 }
 
 export type ProviderQuotaMap = Partial<Record<ToolKind, ProviderQuotaState | null>>;

@@ -2,8 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { LimitProvider, LiveLimits, LiveProviderLimits } from "./types";
-import { load } from "@tauri-apps/plugin-store";
+import type { LimitProvider, LiveProviderLimits } from "./types";
+import { settingsStore } from "./test/settingsStore";
 import * as displaySettings from "./displaySettings";
 
 const invokeMock = vi.fn();
@@ -40,7 +40,7 @@ const liveLimits: { codex: LiveProviderLimits; claude: LiveProviderLimits } = {
   },
 };
 
-function mockLimits(limits: LiveLimits = liveLimits) {
+function mockLimits(limits: { codex: LiveProviderLimits; claude: LiveProviderLimits } = liveLimits) {
   invokeMock.mockImplementation((command: string, args: { provider: LimitProvider }) => {
     if (command === "get_provider_limits") return Promise.resolve(args.provider === "codex" ? limits.codex : limits.claude);
     return Promise.reject(new Error(`Unexpected legacy command: ${command}`));
@@ -221,7 +221,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "取得状況を閉じる" }));
     expect(ring()).toHaveAccessibleName(/週間/);
     expect(ring()).toHaveTextContent("68%");
-    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(invokeMock.mock.calls.filter(([command]) => command === "get_provider_limits")).toHaveLength(2);
   });
 
   it("keeps a failed selected service unknown while the other service succeeds", async () => {
@@ -433,7 +433,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "3本" }));
     await user.selectOptions(screen.getByRole("combobox", { name: "リング3のサービス" }), "kimi_cli");
     fireEvent.change(screen.getByLabelText("Kimi Codeのリング色"), { target: { value: "#ab45ef" } });
-    await waitFor(async () => expect((await (await load("display-settings.json")).get<{ colors: { kimi_cli: string } }>("display"))?.colors.kimi_cli).toBe("#ab45ef"));
+    await waitFor(() => expect((settingsStore.get() as { colors: { kimi_cli?: string } } | undefined)?.colors.kimi_cli).toBe("#ab45ef"));
     view.unmount();
     render(<App />);
     expect(await screen.findByRole("button", { name: "Kimi Codeを外側に表示" })).toBeInTheDocument();
@@ -474,7 +474,7 @@ describe("App", () => {
     expect(preview).toHaveTextContent("実寸 360px");
     fireEvent.pointerUp(window);
     await waitFor(() => expect(screen.queryByTestId("ring-size-preview")).toBeNull(), { timeout: 3000 });
-    await waitFor(async () => expect((await (await load("display-settings.json")).get<{ ringScale: number }>("display"))?.ringScale).toBe(100));
+    await waitFor(() => expect((settingsStore.get() as { ringScale: number } | undefined)?.ringScale).toBe(100));
     view.unmount();
 
     render(<App />);
@@ -488,8 +488,7 @@ describe("App", () => {
   });
 
   it("polls only the saved selected provider and switches monthly quota without pretending it is weekly", async () => {
-    const store = await load("display-settings.json");
-    await store.set("display", { version: 1, providers: ["kimi_cli"], colors: {}, initialScope: "standard" });
+    settingsStore.set({ version: 1, providers: ["kimi_cli"], colors: {}, initialScope: "standard" });
     invokeMock.mockImplementation(() => Promise.resolve({ ...liveLimits.claude, fiveHour: null, weekly: null,
       windows: [{ id: "usage_monthly", label: "月間", kind: "monthly", usedPercent: 25, remainingPercent: 75, resetsAt: null }] }));
     const user = userEvent.setup(); render(<App />);

@@ -2,6 +2,7 @@ use tauri::Manager;
 
 mod app_updates;
 mod claude_auth;
+mod display_settings;
 mod live_limits;
 mod process;
 mod subscription_limits;
@@ -23,8 +24,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             live_limits::get_provider_limits,
+            display_settings::load_display_settings,
+            display_settings::save_display_settings,
             app_updates::check_app_update,
             app_updates::install_app_update,
+            app_updates::app_update_installing,
             app_updates::open_release_page
         ])
         .run(tauri::generate_context!())
