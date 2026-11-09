@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, normalizeSettings, selectedWindow } from "./providers";
 import { applyQuotaResult } from "./quotaRefresh";
+import { minimalRingPx, minimalRingZoom, minimalWindowPx } from "./ringSize";
 import type { ProviderQuotaState } from "./types";
 
 describe("display settings", () => {
@@ -9,8 +10,16 @@ describe("display settings", () => {
     expect(normalizeSettings({ version: 7, providers: ["zai"] })).toEqual(DEFAULT_SETTINGS);
     expect(normalizeSettings({ version: 1, providers: ["zai", "zai", "unknown", "codex", "kimi_cli", "opencode"],
       colors: { zai: "#ABCDEF", codex: "url(private)", unknown: "#ffffff" }, initialScope: "weekly" }))
-      .toEqual({ version: 1, providers: ["zai", "codex", "kimi_cli"], colors: { zai: "#abcdef" }, initialScope: "weekly" });
+      .toEqual({ version: 1, providers: ["zai", "codex", "kimi_cli"], colors: { zai: "#abcdef" }, initialScope: "weekly", ringScale: 50 });
     expect(normalizeSettings({ version: 1, providers: [] }).providers).toEqual(["codex", "claude_code"]);
+  });
+
+  it("keeps the minimal ring size within 1-100 and the original size at 50", () => {
+    expect([0, 1, 37.6, 100, 250, "80", Number.NaN, undefined].map((ringScale) => normalizeSettings({ version: 1, ringScale }).ringScale))
+      .toEqual([1, 1, 38, 100, 100, 50, 50, 50]);
+    expect([50, 100, 25].map((scale) => [minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[180, 200], [360, 400], [90, 100]]);
+    // Smaller settings stop at a 72px ring so the readout and buttons stay usable.
+    expect([20, 1].map((scale) => [minimalRingZoom(scale), minimalRingPx(scale), minimalWindowPx(scale)])).toEqual([[0.4, 72, 80], [0.4, 72, 80]]);
   });
 
   it("does not substitute monthly subscription quota for a missing five-hour or weekly window", () => {

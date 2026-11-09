@@ -10,10 +10,10 @@ import { limitTooltip } from "./limits";
 import { applyQuotaResult, hasCachedQuota, refreshDelay } from "./quotaRefresh";
 import { DEFAULT_SETTINGS, PROVIDER_IDS, normalizeSettings, selectedWindow } from "./providers";
 import { loadDisplaySettings, saveDisplaySettings } from "./displaySettings";
+import { minimalRingZoom, minimalWindowPx } from "./ringSize";
 import type { DisplaySettings, LimitProvider, LimitScope, LiveProviderLimits, ProviderQuotaMap, ToolKind } from "./types";
 
 const NORMAL_SIZE: [number, number] = [400, 380];
-const MINIMAL_SIZE: [number, number] = [200, 200];
 
 export function App() {
   const [settings, setSettings] = useState<DisplaySettings>(() => structuredClone(DEFAULT_SETTINGS));
@@ -99,14 +99,16 @@ export function App() {
     return () => { mounted.current = false; window.clearInterval(timer); };
   }, [refreshLiveLimits]);
 
+  const ringScale = settings.ringScale;
   const enterMinimal = useCallback(async () => {
     try {
       const win = getCurrentWindow();
-      await win.setSize(new LogicalSize(MINIMAL_SIZE[0], MINIMAL_SIZE[1]));
+      const size = minimalWindowPx(ringScale);
+      await win.setSize(new LogicalSize(size, size));
       await win.setAlwaysOnTop(true);
       setPanel(null); setMinimal(true); setError(null);
     } catch (err) { setError(String(err)); }
-  }, []);
+  }, [ringScale]);
   const exitMinimal = useCallback(async () => {
     try {
       const win = getCurrentWindow();
@@ -140,7 +142,8 @@ export function App() {
           <LimitsSettings limits={liveLimits} providers={settings.providers} refreshing={refreshing} onRefresh={() => refreshLiveLimits(true)} /> : <>
             <div className="manaPanel"><ManaRing providers={settings.providers} limits={liveLimits} colors={settings.colors}
               activeTool={activeRingTool} scope={scope} onToggleScope={toggleScope} onSwitchTool={setActiveRingTool}
-              minimal={minimal} staleMessage={staleMessage} onExitMinimal={() => void exitMinimal()} /></div>
+              minimal={minimal} minimalZoom={minimalRingZoom(settings.ringScale)} staleMessage={staleMessage}
+              onExitMinimal={() => void exitMinimal()} /></div>
             {minimal ? null : <div className="chipGrid" data-count={settings.providers.length}
               style={{ gridTemplateColumns: `repeat(${settings.providers.length}, minmax(0, 1fr))` }}>
               {settings.providers.map((id) => <ToolChipRail key={id} provider={id} color={settings.colors[id]} limits={liveLimits[id] ?? null} scope={scope} now={now} />)}

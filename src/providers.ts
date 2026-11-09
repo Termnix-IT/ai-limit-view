@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { DEFAULT_RING_SCALE, normalizeRingScale } from "./ringSize";
 import type { DisplaySettings, LimitScope, ProviderQuotaState, SubscriptionWindow, ToolKind } from "./types";
 
 export const PROVIDERS = {
@@ -14,7 +15,7 @@ export const PROVIDERS = {
 } as const;
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS) as ToolKind[];
-export const DEFAULT_SETTINGS: DisplaySettings = { version: 1, providers: ["codex", "claude_code"], colors: {}, initialScope: "fiveHour" };
+export const DEFAULT_SETTINGS: DisplaySettings = { version: 1, providers: ["codex", "claude_code"], colors: {}, initialScope: "fiveHour", ringScale: DEFAULT_RING_SCALE };
 
 export function normalizeSettings(value: unknown): DisplaySettings {
   if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1) return structuredClone(DEFAULT_SETTINGS);
@@ -28,7 +29,8 @@ export function normalizeSettings(value: unknown): DisplaySettings {
     }
   }
   return { version: 1, providers: providers.length ? providers : [...DEFAULT_SETTINGS.providers], colors,
-    initialScope: row.initialScope === "weekly" || row.initialScope === "standard" ? row.initialScope : "fiveHour" };
+    initialScope: row.initialScope === "weekly" || row.initialScope === "standard" ? row.initialScope : "fiveHour",
+    ringScale: normalizeRingScale(row.ringScale) };
 }
 
 export function providerVariant(id: ToolKind): string { return id === "claude_code" ? "claude" : id; }

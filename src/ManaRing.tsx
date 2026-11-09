@@ -15,12 +15,14 @@ interface ManaRingProps {
   onToggleScope: () => void;
   onSwitchTool: (tool: ToolKind) => void;
   minimal?: boolean;
+  /** Scales the whole 180px minimal ring layout, including its controls. */
+  minimalZoom?: number;
   staleMessage?: string | null;
   onExitMinimal?: () => void;
 }
 
 export function ManaRing({ providers, limits, colors, activeTool, scope, onToggleScope, onSwitchTool,
-  minimal = false, onExitMinimal, staleMessage = null }: ManaRingProps) {
+  minimal = false, minimalZoom = 1, onExitMinimal, staleMessage = null }: ManaRingProps) {
   const active = selectedWindow(limits[activeTool], scope);
   const activePercent = active?.remainingPercent ?? null;
   const activeLabel = PROVIDERS[activeTool].label;
@@ -43,7 +45,7 @@ export function ManaRing({ providers, limits, colors, activeTool, scope, onToggl
   };
   return (
     <div className={`manaRing ${variant}${minimal ? " manaRing--minimal" : ""}`} data-count={providers.length}
-      style={providerStyle(activeTool, colors[activeTool])} aria-label={`Mana ${label}枠の残量`} onMouseDown={handleRimDrag}>
+      style={{ ...providerStyle(activeTool, colors[activeTool]), ...(minimal ? { "--minimal-zoom": minimalZoom } : null) } as React.CSSProperties} aria-label={`Mana ${label}枠の残量`} onMouseDown={handleRimDrag}>
       <svg viewBox="0 0 200 200" role="img" aria-label={`${label}枠：${summary}、外側 ${activeLabel}`}>
         <defs>
           {providers.map((id) => {

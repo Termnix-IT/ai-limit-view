@@ -7,6 +7,51 @@ import { formatDateTime } from "./date";
 import type { AppUpdate } from "./types";
 import type { DisplaySettings, LimitScope, ToolKind } from "./types";
 import { DEFAULT_SETTINGS, PROVIDER_IDS, PROVIDERS } from "./providers";
+import { MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalWindowPx } from "./ringSize";
+
+const PREVIEW_HIDE_DELAY_MS = 1500;
+
+/** Slider for the minimal ring size with an actual-size frame shown while it is adjusted. */
+function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: number) => void }) {
+  const [previewing, setPreviewing] = useState(false);
+  const pointerHeld = useRef(false);
+  const hideTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(hideTimer.current), []);
+  const showPreview = () => {
+    window.clearTimeout(hideTimer.current);
+    setPreviewing(true);
+    if (!pointerHeld.current) hideTimer.current = window.setTimeout(() => setPreviewing(false), PREVIEW_HIDE_DELAY_MS);
+  };
+  const releasePointer = () => { pointerHeld.current = false; showPreview(); };
+  const ringPx = minimalRingPx(scale);
+  const windowPx = minimalWindowPx(scale);
+  return (
+    <div className="displayOptions__ringSize">
+      <div className="displayOptions__ringSizeHead">
+        <label htmlFor="ring-size">ミニマル表示のリングサイズ</label>
+        <output htmlFor="ring-size">{scale}%<span>{ringPx}px</span></output>
+      </div>
+      <input id="ring-size" type="range" min={MIN_RING_SCALE} max={MAX_RING_SCALE} step={1} value={scale}
+        aria-valuetext={`${scale}%（${ringPx}px）`}
+        onPointerDown={() => {
+          // The drag can end outside the slider, so listen on the window.
+          pointerHeld.current = true; showPreview();
+          window.addEventListener("pointerup", releasePointer, { once: true });
+          window.addEventListener("pointercancel", releasePointer, { once: true });
+        }}
+        onFocus={showPreview} onKeyDown={showPreview}
+        onBlur={() => { pointerHeld.current = false; window.clearTimeout(hideTimer.current); setPreviewing(false); }}
+        onChange={(event) => { showPreview(); onChange(Number(event.target.value)); }} />
+      <p className="displayOptions__hint">50%が従来の大きさです。操作できる大きさを保つため、72px未満にはなりません。</p>
+      {previewing ? <div className="ringPreview" data-testid="ring-size-preview" aria-hidden="true">
+        <div className="ringPreview__window" style={{ width: windowPx, height: windowPx }}>
+          <div className="ringPreview__ring" style={{ width: ringPx, height: ringPx }} />
+        </div>
+        <span className="ringPreview__label">実寸 {ringPx}px</span>
+      </div> : null}
+    </div>
+  );
+}
 
 export function AppOptions({ settings, onSettingsChange, onResetSettings, saving = false, settingsError = null }: {
   settings?: DisplaySettings;
@@ -107,6 +152,7 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
             onChange={(event) => onSettingsChange({ ...settings, colors: { ...settings.colors, [provider]: event.target.value } })} />
           {provider !== "codex" && provider !== "claude_code" ? <p className="displayOptions__hint">{PROVIDERS[provider].note}</p> : null}
         </div>)}
+        <RingSizeOption scale={settings.ringScale} onChange={(ringScale) => onSettingsChange({ ...settings, ringScale })} />
         <div className="displayOptions__scope"><label htmlFor="initial-scope">初期表示枠</label>
           <select id="initial-scope" value={settings.initialScope} onChange={(event) => onSettingsChange({ ...settings, initialScope: event.target.value as LimitScope })}>
             <option value="fiveHour">5時間</option><option value="weekly">週間</option><option value="standard">サービス標準</option>

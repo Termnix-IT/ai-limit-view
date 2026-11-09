@@ -15,7 +15,7 @@ Windows x64 向けのインストーラーは [GitHub Releases](https://github.c
 ## Features
 
 - 1～3本の MANA リングで残量を表示し、選択中のサービスの残量を中央に大きく表示
-- オプションで本数、サービスごとの色、初期表示枠を自動保存。初期設定へ戻すことも可能
+- オプションで本数、サービスごとの色、ミニマル表示のリングサイズ（1～100%、実寸プレビュー付き）、初期表示枠を自動保存。初期設定へ戻すことも可能
 - 中央のサービスアイコンをクリック、またはホイール操作で外側リングと中央の残量を選択
 - 中央の数値または枠ラベルで5時間 / 週間 / サービス標準を切り替え。ミニマル表示でも操作可能
 - Codex / Claude Code に加え Z.AI Coding Plan、Kimi Code、Command Code、OpenCode Go を選択可能。Antigravity CLI、GitHub Copilot、Cursor は取得条件付き
@@ -137,7 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-prepare-openusa
 
 ## Data Storage
 
-表示設定（リング数・サービス・配色・初期表示枠）はアプリデータの `display-settings.json` に保存します。利用枠の取得結果と操作中の選択はメモリ上だけに保持し、再起動時は保存した初期表示枠から表示します。設定ファイルには認証情報や利用履歴を保存しません。
+表示設定（リング数・サービス・配色・ミニマル表示のリングサイズ・初期表示枠）はアプリデータの `display-settings.json` に保存します。利用枠の取得結果と操作中の選択はメモリ上だけに保持し、再起動時は保存した初期表示枠から表示します。設定ファイルには認証情報や利用履歴を保存しません。
 
 旧バージョンの手入力、履歴記録、プロセス監視、ローカル推定用の API と保存処理は廃止しました。以前の app data directory にある `ai-limitusage-watcher.db` は既存データの保管用として残り、現在のアプリから読み書きしません。
 

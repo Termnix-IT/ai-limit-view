@@ -336,6 +336,17 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .displayOptions select:focus-visible, .displayOptions input:focus-visible { outline: 2px solid var(--codex-2); outline-offset: 2px; }
 .displayOptions input[type="color"] { width: 30px; height: 28px; padding: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; }
 .displayOptions p.displayOptions__hint { grid-column: 2 / -1; margin: 0; font-size: 10px; }
+.displayOptions__ringSize { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.displayOptions__ringSizeHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; }
+.displayOptions__ringSizeHead output { color: var(--codex-2); font-variant-numeric: tabular-nums; }
+.displayOptions__ringSizeHead output span { margin-left: 6px; color: var(--ink-dim); font-size: 10px; font-weight: 600; }
+.displayOptions input[type="range"] { width: 100%; margin: 0; accent-color: var(--codex-2); cursor: pointer; }
+.displayOptions__ringSize p.displayOptions__hint { margin: 0; }
+/* Actual-size frame of the minimal window and ring, shown while the size slider is adjusted. */
+.ringPreview { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; pointer-events: none; background: rgba(4, 9, 17, 0.42); }
+.ringPreview__window { display: grid; place-items: center; border: 1px dotted rgba(165, 183, 208, 0.55); }
+.ringPreview__ring { border: 2px dashed var(--codex-2); border-radius: 50%; box-shadow: 0 0 0 1px rgba(4, 9, 17, 0.8), inset 0 0 0 1px rgba(4, 9, 17, 0.8), 0 0 12px var(--codex-glow); }
+.ringPreview__label { position: absolute; bottom: 10px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(9, 15, 27, 0.9); font-size: 10px; font-weight: 700; }
 .displayOptions__scope { padding-top: 12px; font-size: 11px; font-weight: 700; }
 .displayOptions__scope select { width: 142px; }
 .displayOptions__footer { margin-top: 10px; }
@@ -348,7 +359,8 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .appShell--minimal { align-items: center; justify-content: center; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .appShell--minimal .workspace { flex: 0 0 auto; display: grid; grid-template-rows: auto; place-items: center; width: 100%; padding: 0; }
 .appShell--minimal .manaPanel::before, .appShell--minimal .manaPanel::after { display: none; }
-.manaRing--minimal { width: 180px; }
+/* zoom scales the 180px layout, controls included; the window is resized to match. */
+.manaRing--minimal { width: 180px; zoom: var(--minimal-zoom, 1); }
 .manaRing--minimal .manaRing__arc { filter: none; }
 .manaRing--minimal .manaRing__title { display: none; }
 .manaRing--minimal .manaRing__center { gap: 3px; }

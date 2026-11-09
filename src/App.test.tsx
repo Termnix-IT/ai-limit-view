@@ -448,6 +448,36 @@ describe("App", () => {
     expect(ring()).toHaveAccessibleName(/5時間/);
   });
 
+  it("previews the minimal ring at actual size while adjusting and applies the saved size to minimal mode", async () => {
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(screen.getByRole("button", { name: "オプション" }));
+    const slider = screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" });
+    expect(slider).toHaveValue("50");
+    expect(slider).toHaveAttribute("aria-valuetext", "50%（180px）");
+    expect(screen.queryByTestId("ring-size-preview")).toBeNull();
+    fireEvent.pointerDown(slider);
+    fireEvent.change(slider, { target: { value: "100" } });
+    const preview = screen.getByTestId("ring-size-preview");
+    expect(preview.querySelector(".ringPreview__ring")).toHaveStyle({ width: "360px", height: "360px" });
+    expect(preview.querySelector(".ringPreview__window")).toHaveStyle({ width: "400px", height: "400px" });
+    expect(preview).toHaveTextContent("実寸 360px");
+    fireEvent.pointerUp(window);
+    await waitFor(() => expect(screen.queryByTestId("ring-size-preview")).toBeNull(), { timeout: 3000 });
+    await waitFor(async () => expect((await (await load("display-settings.json")).get<{ ringScale: number }>("display"))?.ringScale).toBe(100));
+    view.unmount();
+
+    render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
+    await waitFor(() => expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 400, height: 400 })));
+    expect(document.querySelector<HTMLElement>(".manaRing--minimal")?.style.getPropertyValue("--minimal-zoom")).toBe("2");
+    await user.click(screen.getByRole("button", { name: "通常モードに戻す" }));
+    await waitFor(() => expect(setSizeMock).toHaveBeenLastCalledWith(expect.objectContaining({ width: 400, height: 380 })));
+    expect(document.querySelector<HTMLElement>(".manaRing")?.style.getPropertyValue("--minimal-zoom")).toBe("");
+  });
+
   it("polls only the saved selected provider and switches monthly quota without pretending it is weekly", async () => {
     const store = await load("display-settings.json");
     await store.set("display", { version: 1, providers: ["kimi_cli"], colors: {}, initialScope: "standard" });

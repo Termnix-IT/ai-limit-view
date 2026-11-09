@@ -13,6 +13,8 @@ export interface DisplaySettings {
   providers: ToolKind[];
   colors: Partial<Record<ToolKind, string>>;
   initialScope: LimitScope;
+  /** Minimal-mode ring size, 1-100; 50 is the original size. */
+  ringScale: number;
 }
 
 export interface LiveLimitWindow {
