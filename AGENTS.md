@@ -51,7 +51,8 @@
 - Frontend UI is compact and desktop-window oriented. Preserve the dark transparent MANA HUD, circular ring hierarchy, large selected quota, blue Codex/orange Claude color roles, and inline rows with shared separators. Keep normal mode usable at 400x380 and its minimum 360x340.
 - Use `framer-motion` for existing ring/chip motion patterns instead of introducing another animation library.
 - For custom window controls, call `getCurrentWindow()` from `@tauri-apps/api/window`; avoid native browser window assumptions.
-- Minimal mode resizes the Tauri window to `200x200`, sets always-on-top, disables native window shadow, removes the ring core fill, and hides chip rails/titlebar. Restore shadow and core fill in normal mode. Keep `core:window:allow-set-shadow` available, minimal-mode controls reachable, and avoid text-heavy UI there.
+- The native window shadow stays off (`shadow: false` in `tauri.conf.json`) in both modes. On Windows an undecorated shadowed window gets a DWM 1px border and rounded outline around the whole transparent rectangle, which shows as a faint frame outside the HUD; the HUD border comes from CSS only.
+- Minimal mode resizes the Tauri window to `200x200`, sets always-on-top, removes the ring core fill, and hides chip rails/titlebar. Restore core fill in normal mode. Keep minimal-mode controls reachable and avoid text-heavy UI there.
 - Use existing React Testing Library and Vitest patterns for frontend behavior tests.
 - Use concise Rust error strings returned as `Result<_, String>` from Tauri commands.
 - Use only provider-reported percentages and reset timestamps. Quota retrieval errors must show safe classified messages; never expose raw diagnostics, credentials, or account identifiers.

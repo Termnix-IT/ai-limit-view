@@ -14,7 +14,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 const setSizeMock = vi.fn();
 const setAlwaysOnTopMock = vi.fn();
-const setShadowMock = vi.fn();
 vi.mock("@tauri-apps/api/window", () => ({
   LogicalSize: class {
     constructor(public width: number, public height: number) {}
@@ -23,7 +22,6 @@ vi.mock("@tauri-apps/api/window", () => ({
     startDragging: vi.fn(), toggleMaximize: vi.fn(), minimize: vi.fn(), close: vi.fn(),
     setSize: (size: { width: number; height: number }) => setSizeMock(size),
     setAlwaysOnTop: (flag: boolean) => setAlwaysOnTopMock(flag),
-    setShadow: (flag: boolean) => setShadowMock(flag),
   }),
 }));
 
@@ -59,7 +57,7 @@ function serviceButton(label: "Codex" | "Claude Code") {
 
 describe("App", () => {
   beforeEach(() => {
-    invokeMock.mockReset(); setSizeMock.mockReset(); setAlwaysOnTopMock.mockReset(); setShadowMock.mockReset();
+    invokeMock.mockReset(); setSizeMock.mockReset(); setAlwaysOnTopMock.mockReset();
     mockLimits();
   });
 
@@ -294,7 +292,6 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "ミニマル化" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(true);
-      expect(setShadowMock).toHaveBeenCalledWith(false);
       expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 200, height: 200 }));
     });
     expect(screen.queryByText("Codex")).toBeNull();
@@ -307,9 +304,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "通常モードに戻す" }));
     await waitFor(() => {
       expect(setAlwaysOnTopMock).toHaveBeenCalledWith(false);
-      expect(setShadowMock.mock.calls).toEqual([[false], [true]]);
       expect(setSizeMock).toHaveBeenCalledWith(expect.objectContaining({ width: 400, height: 380 }));
-      expect(setShadowMock.mock.invocationCallOrder[1]).toBeLessThan(setSizeMock.mock.invocationCallOrder[1]);
     });
     expect(ring()).toHaveAccessibleName(/週間/);
     expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "true");
@@ -487,13 +482,13 @@ describe("App", () => {
     } finally { save.mockRestore(); }
   });
 
-  it("keeps normal controls available if the native shadow change fails", async () => {
-    setShadowMock.mockRejectedValueOnce(new Error("Native shadow update failed"));
+  it("keeps normal controls available if the native window change fails", async () => {
+    setSizeMock.mockRejectedValueOnce(new Error("Native window update failed"));
     const user = userEvent.setup(); render(<App />);
     await user.click(screen.getByRole("button", { name: "ミニマル化" }));
-    expect(await screen.findByText("Error: Native shadow update failed")).toBeInTheDocument();
+    expect(await screen.findByText("Error: Native window update failed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "通常モードに戻す" })).toBeNull();
-    expect(setSizeMock).not.toHaveBeenCalled();
+    expect(setAlwaysOnTopMock).not.toHaveBeenCalled();
   });
 });
