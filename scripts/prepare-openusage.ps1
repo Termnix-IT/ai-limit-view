@@ -1,7 +1,7 @@
 param([switch]$ForceRebuild)
 $ErrorActionPreference = 'Stop'
-$version = '0.26.1'
-$sourceHash = '0BBD11DCEDF65A972090BE958FBFB814C1F44EFC0D6A67266A92EA5DADD50CE5'
+$version = '0.26.3'
+$sourceHash = 'E094934421A5E6EBDE9C540BFE8B9DAC4E7B483FD884B0CDE4C88A298DE31313'
 $zigHash = '68659EB5F1E4EB1437A722F1DD889C5A322C9954607F5EDCF337BC3684A75A7E'
 $root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $buildRoot = Join-Path $root '.openusage-build'
@@ -31,7 +31,8 @@ if (!$ForceRebuild -and (Test-Path -LiteralPath $destination) -and (Test-Path -L
 }
 if (!(Get-Command go -ErrorAction SilentlyContinue)) { throw 'Go is required to build the provider-filtered OpenUsage bundle.' }
 New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
-$sourceArchive = Join-Path $buildRoot 'source.zip'
+# Versioned name so a version bump never reuses an older verified archive.
+$sourceArchive = Join-Path $buildRoot "source-$version.zip"
 $zigArchive = Join-Path $buildRoot 'zig.zip'
 Get-VerifiedArchive "https://codeload.github.com/janekbaraniewski/openusage/zip/refs/tags/v$version" $sourceArchive $sourceHash
 Get-VerifiedArchive 'https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip' $zigArchive $zigHash

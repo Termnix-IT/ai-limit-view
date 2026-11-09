@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $fixtureRoot = Join-Path $env:TEMP ("limitview-openusage-test-" + [guid]::NewGuid().ToString('N'))
 $scripts = Join-Path $fixtureRoot 'scripts'
 $buildRoot = Join-Path $fixtureRoot '.openusage-build'
-$upstream = Join-Path $fixtureRoot 'fixtures/openusage-0.26.1'
+$version = [regex]::Match([System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'prepare-openusage.ps1')), '(?m)^\$version = ''([^'']+)''').Groups[1].Value
+$upstream = Join-Path $fixtureRoot "fixtures/openusage-$version"
 $zigFixture = Join-Path $fixtureRoot 'fixtures/zig-x86_64-windows-0.16.0'
 New-Item -ItemType Directory -Force -Path $scripts, $buildRoot, (Join-Path $scripts 'openusage'), (Join-Path $upstream 'internal/export'), (Join-Path $upstream 'internal/providers/claude_code'), $zigFixture, (Join-Path $fixtureRoot 'src-tauri/binaries') | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $upstream 'go.mod'), 'module fixture')
@@ -58,7 +59,7 @@ $rejected = $false
 try { & $scriptPath -ForceRebuild } catch { $rejected = $_.Exception.Message -eq 'fixture compiler failure' }
 if (!$rejected -or [System.IO.File]::ReadAllText($destination) -ne 'verified fixture binary') { throw 'Failed rebuild must retain the existing binary.' }
 $fixtureCounters.failBuild = $false
-[System.IO.File]::WriteAllText((Join-Path $buildRoot 'source.zip'), 'corrupted input')
+[System.IO.File]::WriteAllText((Join-Path $buildRoot "source-$version.zip"), 'corrupted input')
 $rejected = $false
 try { & $scriptPath -ForceRebuild } catch { $rejected = $_.Exception.Message -eq 'Downloaded OpenUsage build input has an unexpected checksum.' }
 if (!$rejected) { throw 'Unverified build input must be rejected.' }
