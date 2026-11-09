@@ -102,7 +102,6 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
             onSettingsChange({ ...settings, providers });
           }}>
             {PROVIDER_IDS.map((id) => <option key={id} value={id}>{PROVIDERS[id].label}{PROVIDERS[id].conditional ? "（条件付き）" : ""}</option>)}
-            <option disabled>Gemini CLI（取得方式を確認中）</option>
           </select>
           <input type="color" aria-label={`${PROVIDERS[provider].label}のリング色`} value={settings.colors[provider] ?? PROVIDERS[provider].color}
             onChange={(event) => onSettingsChange({ ...settings, colors: { ...settings.colors, [provider]: event.target.value } })} />
