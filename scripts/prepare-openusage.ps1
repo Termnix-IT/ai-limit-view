@@ -11,6 +11,7 @@ $patchRoot = Join-Path $PSScriptRoot 'openusage'
 # LimitView changes to the pinned source. Each anchor must match exactly once.
 #  - export: fail-closed provider filter before Fetch.
 #  - claude_code / kimi_cli: skip session log scans that LimitView never displays.
+#  - claude_code: do not write the shared statusline cache; results stay in LimitView's memory.
 #  - daemon: keep auto-detected accounts in memory instead of rewriting settings.json.
 #  - detect: import the OpenCode console cookie only when OpenCode is selected.
 $edits = @(
@@ -20,6 +21,9 @@ $edits = @(
     @{ path = 'internal/providers/claude_code/claude_code.go'
        original = 'if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {'
        replacement = 'if err := p.limitviewReadConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {' },
+    @{ path = 'internal/providers/claude_code/claude_code.go'
+       original = 'WriteFiveHourCache(*m.Used)'
+       replacement = 'limitviewWriteFiveHourCache(*m.Used)' },
     @{ path = 'internal/providers/kimi_cli/provider.go'
        original = 'entries, err = readAllSessions(ctx, dir, readKimiConfigModel(resolveConfigPath(acct)))'
        replacement = 'entries, err = limitviewReadAllSessions(ctx, dir, acct)' },

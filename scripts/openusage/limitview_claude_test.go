@@ -36,3 +36,22 @@ func TestLimitViewClaudeSkipsConversationScan(t *testing.T) {
 		})
 	}
 }
+
+func TestLimitViewClaudeDoesNotWriteStatuslineCache(t *testing.T) {
+	for selected, wantWrite := range map[string]bool{"claude_code": false, "": true} {
+		t.Run(selected, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("USERPROFILE", home)
+			t.Setenv("HOME", home)
+			t.Setenv("LIMITVIEW_OPENUSAGE_PROVIDER", selected)
+			used := 42.0
+			snap := core.NewUsageSnapshot("claude_code", "claude")
+			snap.Metrics["usage_five_hour"] = core.Metric{Used: &used, Unit: "%"}
+			cacheFiveHourFromSnapshot(&snap)
+			_, err := os.Stat(filepath.Join(home, ".cache", "openusage", "statusline-5h.json"))
+			if written := err == nil; written != wantWrite {
+				t.Fatalf("statusline cache written = %v, want %v", written, wantWrite)
+			}
+		})
+	}
+}

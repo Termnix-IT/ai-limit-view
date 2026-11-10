@@ -15,6 +15,11 @@ import type { DisplaySettings, LimitProvider, LimitScope, LiveProviderLimits, Pr
 
 const NORMAL_SIZE: [number, number] = [400, 380];
 
+/** Rollback step whose own failure must not hide the original error. */
+async function bestEffort(action: () => Promise<unknown>) {
+  try { await action(); } catch { /* keep the original error */ }
+}
+
 export function App() {
   const [settings, setSettings] = useState<DisplaySettings>(() => structuredClone(DEFAULT_SETTINGS));
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -100,23 +105,30 @@ export function App() {
   }, [refreshLiveLimits]);
 
   const ringScale = settings.ringScale;
-  const enterMinimal = useCallback(async () => {
+  // Each switch pins/unpins first and resizes second. If the resize fails, only the
+  // pin is undone, so the window keeps its previous size and never stays half-switched.
+  // One switch runs at a time; a second request while one is pending is ignored.
+  const switchingMode = useRef(false);
+  const switchMode = useCallback(async (toMinimal: boolean) => {
+    if (switchingMode.current) return;
+    switchingMode.current = true;
+    const win = getCurrentWindow();
+    let pinChanged = false;
     try {
-      const win = getCurrentWindow();
-      const size = minimalWindowPx(ringScale);
-      await win.setSize(new LogicalSize(size, size));
-      await win.setAlwaysOnTop(true);
-      setPanel(null); setMinimal(true); setError(null);
-    } catch (err) { setError(String(err)); }
+      await win.setAlwaysOnTop(toMinimal);
+      pinChanged = true;
+      const minimalPx = minimalWindowPx(ringScale);
+      const [width, height] = toMinimal ? [minimalPx, minimalPx] : NORMAL_SIZE;
+      await win.setSize(new LogicalSize(width, height));
+      if (toMinimal) setPanel(null);
+      setMinimal(toMinimal); setError(null);
+    } catch (err) {
+      if (pinChanged) await bestEffort(() => win.setAlwaysOnTop(!toMinimal));
+      setError(String(err));
+    } finally {
+      switchingMode.current = false;
+    }
   }, [ringScale]);
-  const exitMinimal = useCallback(async () => {
-    try {
-      const win = getCurrentWindow();
-      await win.setAlwaysOnTop(false);
-      await win.setSize(new LogicalSize(NORMAL_SIZE[0], NORMAL_SIZE[1]));
-      setMinimal(false); setError(null);
-    } catch (err) { setError(String(err)); }
-  }, []);
 
   // Re-evaluated every second with `now`, so expired source data disappears between polls.
   const liveLimits = useMemo<ProviderQuotaMap>(() => Object.fromEntries(Object.entries(storedLimits)
@@ -135,7 +147,7 @@ export function App() {
       {minimal ? null : <Titlebar syncedAt={syncedAt} refreshing={refreshing || !settingsLoaded} onReload={() => refreshLiveLimits(true)}
         onSettings={() => setPanel((current) => current === "limits" ? null : "limits")} settingsOpen={panel === "limits"}
         onOptions={() => setPanel((current) => current === "options" ? null : "options")} optionsOpen={panel === "options"}
-        onMinimal={() => void enterMinimal()} />}
+        onMinimal={() => void switchMode(true)} />}
       <section className={`workspace${panel && !minimal ? " workspace--settings" : ""}`}>
         {error && !minimal ? <div className="alert danger">{error}</div> : null}
         {panel === "options" && !minimal ? <AppOptions settings={settingsLoaded ? settings : undefined} saving={saving}
@@ -146,7 +158,7 @@ export function App() {
             <div className="manaPanel"><ManaRing providers={settings.providers} limits={liveLimits} colors={settings.colors}
               activeTool={activeRingTool} scope={scope} onToggleScope={toggleScope} onSwitchTool={setActiveRingTool}
               minimal={minimal} minimalZoom={minimalRingZoom(settings.ringScale)} staleMessage={staleMessage}
-              onExitMinimal={() => void exitMinimal()} /></div>
+              onExitMinimal={() => void switchMode(false)} /></div>
             {minimal ? null : <div className="chipGrid" data-count={settings.providers.length}
               style={{ gridTemplateColumns: `repeat(${settings.providers.length}, minmax(0, 1fr))` }}>
               {settings.providers.map((id) => <ToolChipRail key={id} provider={id} color={settings.colors[id]} limits={liveLimits[id] ?? null} scope={scope} now={now} />)}

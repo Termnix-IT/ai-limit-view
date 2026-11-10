@@ -9,7 +9,7 @@ $zigFixture = Join-Path $fixtureRoot 'fixtures/zig-x86_64-windows-0.16.0'
 # Anchor lines from the pinned source, keyed by file, with the text each patch must produce.
 $anchors = [ordered]@{
     'internal/export/direct.go' = @('accounts := c.resolveAccts(&cfg)', 'limitviewProviderAccounts(c.resolveAccts(&cfg))')
-    'internal/providers/claude_code/claude_code.go' = @('if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {', 'p.limitviewReadConversationJSONL(')
+    'internal/providers/claude_code/claude_code.go' = @("if err := p.readConversationJSONL(projectsDir, newProjectsDir, &snap); err != nil {`nWriteFiveHourCache(*m.Used)", 'p.limitviewReadConversationJSONL(', 'limitviewWriteFiveHourCache(*m.Used)')
     'internal/providers/kimi_cli/provider.go' = @('entries, err = readAllSessions(ctx, dir, readKimiConfigModel(resolveConfigPath(acct)))', 'limitviewReadAllSessions(ctx, dir, acct)')
     'internal/daemon/accounts.go' = @('if !sameAutoDetectedAccounts(cfg.AutoDetectedAccounts, autoDetected) {', '!limitviewSkipAutoDetectedSave() && ')
     'internal/detect/opencode_session.go' = @("func detect() {`n`topencodeProbeMu.Lock()`n}", "if limitviewSkipOpenCodeImport() {")
@@ -47,7 +47,9 @@ function go {
         $fixtureCounters.tests++
         foreach ($file in $anchors.Keys) {
             $text = [System.IO.File]::ReadAllText((Join-Path (Get-Location) $file))
-            if (!$text.Contains($anchors[$file][1])) { throw "Patch must be installed before tests: $file" }
+            foreach ($expected in $anchors[$file][1..($anchors[$file].Count - 1)]) {
+                if (!$text.Contains($expected)) { throw "Patch must be installed before tests: $file" }
+            }
             if ($text.Contains('tampered')) { throw "Stale extraction reached the build: $file" }
         }
         foreach ($overlay in Get-ChildItem -LiteralPath (Join-Path $scripts 'openusage') -Filter '*.go') {

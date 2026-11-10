@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { Clock3, Maximize2, Sparkles, TriangleAlert } from "lucide-react";
-import type { MouseEvent, WheelEvent } from "react";
+import { useEffect, useRef } from "react";
+import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ServiceMark } from "./ServiceMark";
 import { PROVIDERS, providerStyle, providerVariant, scopeLabel, selectedWindow } from "./providers";
@@ -37,12 +38,26 @@ export function ManaRing({ providers, limits, colors, activeTool, scope, onToggl
     if (!minimal || event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
     void getCurrentWindow().startDragging();
   };
-  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    if (!event.deltaY) return;
-    const index = providers.indexOf(activeTool);
-    onSwitchTool(providers[(index + (event.deltaY > 0 ? 1 : providers.length - 1)) % providers.length]);
-  };
+  const switchByWheel = useRef<(deltaY: number) => void>(() => {});
+  useEffect(() => {
+    switchByWheel.current = (deltaY) => {
+      const index = providers.indexOf(activeTool);
+      onSwitchTool(providers[(index + (deltaY > 0 ? 1 : providers.length - 1)) % providers.length]);
+    };
+  });
+  const center = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // React attaches wheel listeners as passive, where preventDefault is ignored.
+    // A native non-passive listener keeps the wheel from also scrolling the page.
+    const element = center.current;
+    if (!element) return;
+    const handleWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      if (event.deltaY) switchByWheel.current(event.deltaY);
+    };
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => element.removeEventListener("wheel", handleWheel);
+  }, []);
   return (
     <div className={`manaRing ${variant}${minimal ? " manaRing--minimal" : ""}`} data-count={providers.length}
       style={{ ...providerStyle(activeTool, colors[activeTool]), ...(minimal ? { "--minimal-zoom": minimalZoom } : null) } as React.CSSProperties} aria-label={`Mana ${label}枠の残量`} onMouseDown={handleRimDrag}>
@@ -74,7 +89,7 @@ export function ManaRing({ providers, limits, colors, activeTool, scope, onToggl
           width={providers.length === 3 ? [10, 7, 6][index] : [12, 9][index]}
           remaining={selectedWindow(limits[id], scope)?.remainingPercent ?? null} />)}</g>
       </svg>
-      <div className="manaRing__center" data-unknown={activePercent === null} onWheel={handleWheel}>
+      <div ref={center} className="manaRing__center" data-unknown={activePercent === null}>
         <button type="button" className="manaRing__readout" onClick={onToggleScope}
           aria-label={`残量枠切替 (現在 ${label} / ${activeLabel})${staleMessage ? " · 前回の取得値（更新失敗）" : ""}`}
           title={staleMessage ?? "クリックで表示枠切替 · ホイールでサービス切替"}>

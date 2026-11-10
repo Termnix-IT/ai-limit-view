@@ -14,3 +14,12 @@ func (p *Provider) limitviewReadConversationJSONL(projectsDir, altProjectsDir st
 	}
 	return p.readConversationJSONL(projectsDir, altProjectsDir, snap)
 }
+
+// LimitView keeps quota results in memory only. Do not warm OpenUsage's shared
+// statusline cache (~/.cache/openusage/statusline-5h.json) from its exports.
+func limitviewWriteFiveHourCache(pct float64) {
+	if os.Getenv("LIMITVIEW_OPENUSAGE_PROVIDER") == "claude_code" {
+		return
+	}
+	WriteFiveHourCache(pct)
+}

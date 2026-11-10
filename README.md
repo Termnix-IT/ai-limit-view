@@ -68,7 +68,7 @@ Codex はインストール済みの `codex.exe app-server` の `account/rateLim
 - 利用するサービスのログイン・連携設定
 - Go（同梱OpenUsageの初回ビルド・再ビルド時）
 
-OpenUsage 0.26.3 に、取得前のサービスフィルター、Claude Code と Kimi Code のセッションログ解析の省略、自動検出結果を OpenUsage の設定ファイルへ保存しない変更、OpenCode のブラウザーCookie取り込みを OpenCode Go の取得時に限る変更を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。配布アプリの利用者が Go を導入する必要はありません。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
+OpenUsage 0.26.3 に、取得前のサービスフィルター、Claude Code と Kimi Code のセッションログ解析の省略、自動検出結果を OpenUsage の設定ファイルへ保存しない変更、Claude Code の使用率を OpenUsage の statusline 用キャッシュへ書き込まない変更、OpenCode のブラウザーCookie取り込みを OpenCode Go の取得時に限る変更を加え、`npm run tauri dev` / `npm run tauri build` の前にソースからビルドして同梱します。配布アプリの利用者が Go を導入する必要はありません。`cargo test` を直接実行する前には `npm run pretauri` を一度実行してください。
 
 初回は固定版の公式ソース、Goの依存関係・必要なGo toolchain、Cコンパイラーとして公式のポータブル Zig 0.16.0 を取得します。ソースとZigのアーカイブはSHA-256で検証し、コンパイラーとキャッシュはGit管理外の `.openusage-build/` に配置します。再ビルドには `scripts/prepare-openusage.ps1 -ForceRebuild` を使用します。これらのパッチとそのテストの変更を検知して再ビルドし、再利用時は同梱実行ファイルのチェックサムを検証します。
 

@@ -103,6 +103,15 @@ describe("App", () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
+  it("handles the ring wheel itself instead of scrolling the page", async () => {
+    render(<App />);
+    await screen.findByRole("img", { name: /Claude Code 94%/ });
+    const event = new WheelEvent("wheel", { deltaY: 1, bubbles: true, cancelable: true });
+    act(() => { ring().dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true);
+    expect(serviceButton("Codex")).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("switches the highlighted tool with the wheel while keeping the quota scope", async () => {
     const user = userEvent.setup(); render(<App />);
     await user.click(ring());
@@ -521,12 +530,47 @@ describe("App", () => {
   });
 
   it("keeps normal controls available if the native window change fails", async () => {
-    setSizeMock.mockRejectedValueOnce(new Error("Native window update failed"));
+    setAlwaysOnTopMock.mockRejectedValueOnce(new Error("Native window update failed"));
     const user = userEvent.setup(); render(<App />);
     await user.click(screen.getByRole("button", { name: "ミニマル化" }));
     expect(await screen.findByText("Error: Native window update failed")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "通常モードに戻す" })).toBeNull();
-    expect(setAlwaysOnTopMock).not.toHaveBeenCalled();
+    expect(setAlwaysOnTopMock).toHaveBeenCalledTimes(1);
+    expect(setSizeMock).not.toHaveBeenCalled();
+  });
+
+  it("unpins the window and keeps its size if resizing to minimal fails", async () => {
+    setSizeMock.mockRejectedValueOnce(new Error("Resize failed"));
+    const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
+    expect(await screen.findByText("Error: Resize failed")).toBeInTheDocument();
+    expect(setAlwaysOnTopMock.mock.calls.map(([flag]) => flag)).toEqual([true, false]);
+    expect(setSizeMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "ミニマル化" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "通常モードに戻す" })).toBeNull();
+  });
+
+  it("ignores a second minimal switch while one is pending", async () => {
+    let releasePin: () => void = () => {};
+    setAlwaysOnTopMock.mockImplementationOnce(() => new Promise<void>((resolve) => { releasePin = resolve; }));
+    const user = userEvent.setup(); render(<App />);
+    const button = screen.getByRole("button", { name: "ミニマル化" });
+    await user.click(button); await user.click(button);
+    releasePin();
+    expect(await screen.findByRole("button", { name: "通常モードに戻す" })).toBeInTheDocument();
+    expect(setAlwaysOnTopMock).toHaveBeenCalledTimes(1);
+    expect(setSizeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps minimal mode pinned if restoring the normal size fails", async () => {
+    const user = userEvent.setup(); render(<App />);
+    await user.click(screen.getByRole("button", { name: "ミニマル化" }));
+    const restore = await screen.findByRole("button", { name: "通常モードに戻す" });
+    setSizeMock.mockRejectedValueOnce(new Error("Resize failed"));
+    await user.click(restore);
+    await waitFor(() => expect(setAlwaysOnTopMock).toHaveBeenLastCalledWith(true));
+    expect(setAlwaysOnTopMock.mock.calls.map(([flag]) => flag)).toEqual([true, false, true]);
+    expect(screen.getByRole("button", { name: "通常モードに戻す" })).toBeInTheDocument();
   });
 });
