@@ -478,8 +478,13 @@ describe("App", () => {
     fireEvent.pointerDown(slider);
     fireEvent.change(slider, { target: { value: "100" } });
     const preview = screen.getByTestId("ring-size-preview");
-    expect(preview.querySelector(".ringPreview__ring")).toHaveStyle({ width: "360px", height: "360px" });
-    expect(preview.querySelector(".ringPreview__window")).toHaveStyle({ width: "400px", height: "400px" });
+    // The preview is the real minimal ring at 100% (live quota is 94%), not a placeholder frame.
+    const previewRing = preview.querySelector(".manaRing--minimal");
+    expect(previewRing).toHaveStyle({ "--minimal-zoom": "2" });
+    expect(previewRing).toHaveAttribute("data-count", "2");
+    expect(preview.querySelector("svg")).toHaveAccessibleName(/Claude Code 100%、Codex 100%、外側 Claude Code/);
+    expect(preview.querySelector(".manaRing__value")).toHaveTextContent("100%");
+    expect(preview.querySelector(".ringPreview__window")).toBeNull();
     expect(preview).toHaveTextContent("実寸 360px");
     fireEvent.pointerUp(window);
     await waitFor(() => expect(screen.queryByTestId("ring-size-preview")).toBeNull(), { timeout: 3000 });

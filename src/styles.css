@@ -344,10 +344,9 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .displayOptions__ringSizeControl .refreshButton { font-size: 10px; white-space: nowrap; }
 .displayOptions input[type="range"] { width: 100%; margin: 0; accent-color: var(--codex-2); cursor: pointer; }
 .displayOptions__ringSize p.displayOptions__hint { margin: 0; }
-/* Actual-size frame of the minimal window and ring, shown while the size slider is adjusted. */
-.ringPreview { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; pointer-events: none; background: rgba(4, 9, 17, 0.42); }
-.ringPreview__window { display: grid; place-items: center; border: 1px dotted rgba(165, 183, 208, 0.55); }
-.ringPreview__ring { border: 2px dashed var(--codex-2); border-radius: 50%; box-shadow: 0 0 0 1px rgba(4, 9, 17, 0.8), inset 0 0 0 1px rgba(4, 9, 17, 0.8), 0 0 12px var(--codex-glow); }
+/* Actual-size minimal ring at 100%, shown while the size slider is adjusted. */
+.ringPreview { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; pointer-events: none; background: rgba(4, 9, 17, 0.72); }
+.ringPreview * { pointer-events: none; }
 .ringPreview__label { position: absolute; bottom: 10px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(9, 15, 27, 0.9); font-size: 10px; font-weight: 700; }
 .displayOptions__scope { padding-top: 12px; font-size: 11px; font-weight: 700; }
 .displayOptions__scope select { width: 142px; }

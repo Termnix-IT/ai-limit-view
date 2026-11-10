@@ -5,15 +5,40 @@ import appIcon from "../src-tauri/icons/32x32.png";
 import { api } from "./api";
 import { formatDateTime } from "./date";
 import type { AppUpdate } from "./types";
-import type { DisplaySettings, LimitScope, ToolKind } from "./types";
-import { DEFAULT_SETTINGS, PROVIDER_IDS, PROVIDERS } from "./providers";
-import { DEFAULT_RING_SCALE, MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalWindowPx } from "./ringSize";
+import type { DisplaySettings, LimitScope, ProviderQuotaMap, SubscriptionWindow, ToolKind } from "./types";
+import { DEFAULT_SETTINGS, PROVIDER_IDS, PROVIDERS, providerWindows } from "./providers";
+import { ManaRing } from "./ManaRing";
+import { DEFAULT_RING_SCALE, MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalRingZoom } from "./ringSize";
 
 const PREVIEW_HIDE_DELAY_MS = 1500;
 const INSTALL_POLL_MS = 2000;
 
-/** Slider for the minimal ring size with an actual-size frame shown while it is adjusted. */
-function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: number) => void }) {
+const FULL = { usedPercent: 0, remainingPercent: 100, resetsAt: null };
+const FALLBACK_WINDOWS: SubscriptionWindow[] = [
+  { ...FULL, id: "fiveHour", label: "5時間", kind: "fiveHour" },
+  { ...FULL, id: "weekly", label: "週間", kind: "weekly" },
+];
+
+/**
+ * Every configured provider at 100%, so the preview shows full rings regardless of live quotas.
+ * Known windows keep their labels and kinds (e.g. a monthly standard window); only the amount is replaced.
+ */
+function fullQuotas(providers: ToolKind[], limits: ProviderQuotaMap, scope: LimitScope): ProviderQuotaMap {
+  return Object.fromEntries(providers.map((id) => {
+    const known = providerWindows(limits[id]).map((entry) => ({ ...entry, ...FULL }));
+    const windows = scope === "standard"
+      ? known.length ? known : [{ ...FULL, id: "standard", label: "サービス標準", kind: "other" as const }]
+      : known.some((entry) => entry.kind === scope) ? known : [...known, ...FALLBACK_WINDOWS.filter((entry) => entry.kind === scope)];
+    return [id, { status: "ok", source: "preview", checkedAt: "", fiveHour: null, weekly: null, windows,
+      message: null, errorCode: null, lastSuccessAt: null, nextRetryAt: null }];
+  }));
+}
+
+/** Slider for the minimal ring size with the actual minimal ring shown while it is adjusted. */
+function RingSizeOption({ scale, settings, limits, activeTool, scope, onChange }: {
+  scale: number; settings: DisplaySettings; limits: ProviderQuotaMap; activeTool: ToolKind; scope: LimitScope;
+  onChange: (scale: number) => void;
+}) {
   const [previewing, setPreviewing] = useState(false);
   const pointerHeld = useRef(false);
   const hideTimer = useRef<number | undefined>(undefined);
@@ -25,7 +50,6 @@ function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: 
   };
   const releasePointer = () => { pointerHeld.current = false; showPreview(); };
   const ringPx = minimalRingPx(scale);
-  const windowPx = minimalWindowPx(scale);
   return (
     <div className="displayOptions__ringSize">
       <div className="displayOptions__ringSizeHead">
@@ -49,18 +73,24 @@ function RingSizeOption({ scale, onChange }: { scale: number; onChange: (scale: 
           onClick={() => { showPreview(); onChange(DEFAULT_RING_SCALE); }}>50%に戻す</button>
       </div>
       <p className="displayOptions__hint">1%で72px、50%で従来の180px、100%で2倍の360pxです。</p>
-      {previewing ? <div className="ringPreview" data-testid="ring-size-preview" aria-hidden="true">
-        <div className="ringPreview__window" style={{ width: windowPx, height: windowPx }}>
-          <div className="ringPreview__ring" style={{ width: ringPx, height: ringPx }} />
-        </div>
+      {/* A display-only copy of the minimal ring; inert keeps its buttons out of focus and clicks. */}
+      {previewing ? <div className="ringPreview" data-testid="ring-size-preview" aria-hidden="true" ref={(element) => { if (element) element.inert = true; }}>
+        <ManaRing providers={settings.providers} limits={fullQuotas(settings.providers, limits, scope)} colors={settings.colors}
+          activeTool={activeTool} scope={scope} onToggleScope={() => {}} onSwitchTool={() => {}} onExitMinimal={() => {}}
+          minimal minimalZoom={minimalRingZoom(scale)} />
         <span className="ringPreview__label">実寸 {ringPx}px</span>
       </div> : null}
     </div>
   );
 }
 
-export function AppOptions({ settings, onSettingsChange, onResetSettings, saving = false, settingsError = null }: {
+export function AppOptions({ settings, limits = {}, activeTool, scope, onSettingsChange, onResetSettings, saving = false, settingsError = null }: {
   settings?: DisplaySettings;
+  /** Live quotas whose window labels the ring size preview reuses; the amounts are always shown as 100%. */
+  limits?: ProviderQuotaMap;
+  /** Outer ring and scope shown by the ring size preview; defaults to the first provider and the initial scope. */
+  activeTool?: ToolKind;
+  scope?: LimitScope;
   onSettingsChange?: (settings: DisplaySettings) => void;
   onResetSettings?: () => void;
   saving?: boolean;
@@ -167,7 +197,9 @@ export function AppOptions({ settings, onSettingsChange, onResetSettings, saving
             onChange={(event) => onSettingsChange({ ...settings, colors: { ...settings.colors, [provider]: event.target.value } })} />
           {provider !== "codex" && provider !== "claude_code" ? <p className="displayOptions__hint">{PROVIDERS[provider].note}</p> : null}
         </div>)}
-        <RingSizeOption scale={settings.ringScale} onChange={(ringScale) => onSettingsChange({ ...settings, ringScale })} />
+        <RingSizeOption scale={settings.ringScale} settings={settings} limits={limits}
+          activeTool={activeTool && settings.providers.includes(activeTool) ? activeTool : settings.providers[0]}
+          scope={scope ?? settings.initialScope} onChange={(ringScale) => onSettingsChange({ ...settings, ringScale })} />
         <div className="displayOptions__scope"><label htmlFor="initial-scope">初期表示枠</label>
           <select id="initial-scope" value={settings.initialScope} onChange={(event) => onSettingsChange({ ...settings, initialScope: event.target.value as LimitScope })}>
             <option value="fiveHour">5時間</option><option value="weekly">週間</option><option value="standard">サービス標準</option>

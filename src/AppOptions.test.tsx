@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppOptions } from "./AppOptions";
 import { api } from "./api";
 import { getVersion } from "@tauri-apps/api/app";
-import type { AppUpdate } from "./types";
+import { DEFAULT_SETTINGS } from "./providers";
+import type { AppUpdate, DisplaySettings } from "./types";
 
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: vi.fn() }));
 vi.mock("./api", () => ({ api: { checkAppUpdate: vi.fn(), installAppUpdate: vi.fn(), appUpdateInstalling: vi.fn(), openReleasePage: vi.fn() } }));
@@ -119,6 +120,57 @@ describe("AppOptions", () => {
     await user.click(screen.getByRole("button", { name: "配布ページを開く" }));
     await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
     expect(document.body).not.toHaveTextContent("private-browser-error");
+  });
+
+  it.each([
+    [["codex"], "1"],
+    [["codex", "claude_code", "zai"], "3"],
+  ] as const)("previews the minimal ring with %j at 100%% without live quotas", async (providers, count) => {
+    const settings: DisplaySettings = { ...structuredClone(DEFAULT_SETTINGS), providers: [...providers], ringScale: 1 };
+    const user = userEvent.setup();
+    render(<AppOptions settings={settings} activeTool={providers[providers.length - 1]} scope="weekly" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
+    const preview = screen.getByTestId("ring-size-preview");
+    const ring = preview.querySelector(".manaRing--minimal");
+    expect(ring).toHaveAttribute("data-count", count);
+    expect(ring?.getAttribute("style")).toContain("--minimal-zoom: 0.4");
+    expect(preview.querySelectorAll(".manaRing__arc")).toHaveLength(providers.length);
+    expect(preview.querySelectorAll(".manaRing__serviceButton")).toHaveLength(providers.length);
+    expect(preview.querySelector(".manaRing__serviceButton[aria-pressed=\"true\"]")).toHaveAttribute("aria-label",
+      expect.stringContaining(providers[providers.length - 1] === "zai" ? "Z.AI" : "Codex"));
+    expect(preview.querySelector(".manaRing__scope")).toHaveTextContent("週間枠");
+    expect(preview).toHaveTextContent("実寸 72px");
+    // The copy is display-only: it is hidden from assistive technology and cannot take focus or clicks.
+    expect(screen.queryByRole("button", { name: /を外側に表示/ })).toBeNull();
+    expect((preview as HTMLElement & { inert?: boolean }).inert).toBe(true);
+  });
+
+  it("keeps each service's standard window label in the 100% preview", async () => {
+    const settings: DisplaySettings = { ...structuredClone(DEFAULT_SETTINGS), providers: ["kimi_cli", "codex"] };
+    const monthly = { id: "monthly", label: "月間", kind: "monthly" as const, usedPercent: 70, remainingPercent: 30, resetsAt: null };
+    const limits = { kimi_cli: { status: "ok" as const, source: "OpenUsage", checkedAt: "", fiveHour: null, weekly: null, windows: [monthly],
+      message: null, errorCode: null, lastSuccessAt: null, nextRetryAt: null } };
+    const user = userEvent.setup();
+    render(<AppOptions settings={settings} limits={limits} activeTool="kimi_cli" scope="standard" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
+    const preview = screen.getByTestId("ring-size-preview");
+    expect(preview.querySelector(".manaRing__scope")).toHaveTextContent("月間枠");
+    expect(preview.querySelector(".manaRing__value")).toHaveTextContent("100%");
+    // Codex has no live data yet; its standard ring is still drawn at 100%.
+    expect(preview.querySelector("svg")).toHaveAccessibleName(/Kimi Code 100%、Codex 100%/);
+  });
+
+  it("draws every ring at 100% even if a service lacks the selected window", async () => {
+    const settings: DisplaySettings = { ...structuredClone(DEFAULT_SETTINGS), providers: ["kimi_cli", "codex"] };
+    const monthly = { id: "monthly", label: "月間", kind: "monthly" as const, usedPercent: 70, remainingPercent: 30, resetsAt: null };
+    const limits = { kimi_cli: { status: "ok" as const, source: "OpenUsage", checkedAt: "", fiveHour: null, weekly: null, windows: [monthly],
+      message: null, errorCode: null, lastSuccessAt: null, nextRetryAt: null } };
+    const user = userEvent.setup();
+    render(<AppOptions settings={settings} limits={limits} activeTool="kimi_cli" scope="fiveHour" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
+    const preview = screen.getByTestId("ring-size-preview");
+    expect(preview.querySelectorAll(".manaRing__arc")).toHaveLength(2);
+    expect(preview.querySelector(".manaRing__scope")).toHaveTextContent("5時間枠");
   });
 
   it("can recover version information through a successful update check", async () => {

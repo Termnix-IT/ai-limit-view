@@ -150,7 +150,8 @@ export function App() {
         onMinimal={() => void switchMode(true)} />}
       <section className={`workspace${panel && !minimal ? " workspace--settings" : ""}`}>
         {error && !minimal ? <div className="alert danger">{error}</div> : null}
-        {panel === "options" && !minimal ? <AppOptions settings={settingsLoaded ? settings : undefined} saving={saving}
+        {panel === "options" && !minimal ? <AppOptions settings={settingsLoaded ? settings : undefined}
+          limits={liveLimits} activeTool={activeRingTool} scope={scope} saving={saving}
           settingsError={settingsError} onSettingsChange={changeSettings} onResetSettings={() => {
             changeSettings(structuredClone(DEFAULT_SETTINGS)); setScope("fiveHour"); setActiveRingTool("claude_code");
           }} /> : panel === "limits" && !minimal ?
