@@ -25,7 +25,7 @@
 - `src/ManaRing.tsx`: animated 1-3 ring MANA visualization; the selected provider is the outer ring and the others are inner rings. Default colors are Codex blue and Claude orange; users can override colors per provider.
 - `src/ToolChipRail.tsx`: status rail for each provider's representative windows, retrieval status, and the selected scope reset countdown.
 - `src/contextMenu.ts`: native right-click menu items (Tauri `Menu.popup`); `App.tsx` owns the `contextmenu` listener, the always-on-top state, and the actions.
-- `src/AppOptions.tsx`: options panel for ring count, providers, colors, minimal ring size, initial scope, app version, and update buttons.
+- `src/AppOptions.tsx`: options panel split into ring (count, providers, colors), display (initial scope, minimal ring size), and app (version, updates, release page, settings reset) tabs.
 - `src/providers.ts`: provider catalog (labels, default colors, notes), `DisplaySettings` defaults/normalization, and window selection per scope.
 - `src/displaySettings.ts`: loads/saves display settings through the `load_display_settings` / `save_display_settings` commands.
 - `src/quotaRefresh.ts`: refresh intervals, rate-limit backoff, and keeping the last successful quota on transient errors.

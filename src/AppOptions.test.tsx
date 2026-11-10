@@ -129,6 +129,7 @@ describe("AppOptions", () => {
     const settings: DisplaySettings = { ...structuredClone(DEFAULT_SETTINGS), providers: [...providers], ringScale: 1 };
     const user = userEvent.setup();
     render(<AppOptions settings={settings} activeTool={providers[providers.length - 1]} scope="weekly" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("tab", { name: "表示" }));
     await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
     const preview = screen.getByTestId("ring-size-preview");
     const ring = preview.querySelector(".manaRing--minimal");
@@ -152,6 +153,7 @@ describe("AppOptions", () => {
       message: null, errorCode: null, lastSuccessAt: null, nextRetryAt: null } };
     const user = userEvent.setup();
     render(<AppOptions settings={settings} limits={limits} activeTool="kimi_cli" scope="standard" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("tab", { name: "表示" }));
     await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
     const preview = screen.getByTestId("ring-size-preview");
     expect(preview.querySelector(".manaRing__scope")).toHaveTextContent("月間枠");
@@ -167,10 +169,57 @@ describe("AppOptions", () => {
       message: null, errorCode: null, lastSuccessAt: null, nextRetryAt: null } };
     const user = userEvent.setup();
     render(<AppOptions settings={settings} limits={limits} activeTool="kimi_cli" scope="fiveHour" onSettingsChange={() => {}} />);
+    await user.click(screen.getByRole("tab", { name: "表示" }));
     await user.click(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" }));
     const preview = screen.getByTestId("ring-size-preview");
     expect(preview.querySelectorAll(".manaRing__arc")).toHaveLength(2);
     expect(preview.querySelector(".manaRing__scope")).toHaveTextContent("5時間枠");
+  });
+
+  it("groups settings into ring, display and app tabs with keyboard navigation", async () => {
+    const onSettingsChange = vi.fn();
+    const settings: DisplaySettings = { ...structuredClone(DEFAULT_SETTINGS), providers: ["codex", "zai"] };
+    const user = userEvent.setup();
+    render(<AppOptions settings={settings} onSettingsChange={onSettingsChange} />);
+    const rings = screen.getByRole("tab", { name: "リング" });
+    expect(rings).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("リング");
+    expect(screen.getByRole("button", { name: "2本" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "更新を確認" })).toBeNull();
+    expect(screen.queryByRole("slider")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Codexの取得条件" })).toBeNull();
+    const note = screen.getByRole("button", { name: "Z.AI Coding Planの取得条件" });
+    expect(screen.queryByText(/APIキー/)).toBeNull();
+    await user.click(note);
+    expect(note).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/APIキー/)).toBeInTheDocument();
+    await user.click(note);
+    expect(screen.queryByText(/APIキー/)).toBeNull();
+
+    rings.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "表示" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "表示" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "5時間" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "サービス標準" }));
+    expect(onSettingsChange).toHaveBeenLastCalledWith(expect.objectContaining({ initialScope: "standard" }));
+
+    screen.getByRole("tab", { name: "表示" }).focus();
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "アプリ" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "更新を確認" })).toBeInTheDocument();
+    await user.keyboard("{ArrowRight}");
+    expect(rings).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("自動保存");
+  });
+
+  it("opens on the app tab and keeps setting controls out while settings are not loaded", async () => {
+    const user = userEvent.setup(); render(<AppOptions />);
+    expect(screen.getByRole("tab", { name: "アプリ" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("button", { name: "初期設定に戻す" })).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "リング" }));
+    expect(screen.getByText("表示設定を読み込んでいます…")).toBeInTheDocument();
   });
 
   it("can recover version information through a successful update check", async () => {

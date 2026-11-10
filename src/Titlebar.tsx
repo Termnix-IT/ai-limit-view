@@ -1,4 +1,4 @@
-import { Minimize2, Minus, RefreshCw, Settings, SlidersHorizontal, X } from "lucide-react";
+import { Activity, Minimize2, Minus, RefreshCw, Settings, X } from "lucide-react";
 import appIcon from "../src-tauri/icons/32x32.png";
 import type { MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -59,12 +59,12 @@ export function Titlebar({ onReload, onSettings, onOptions, onMinimal, settingsO
           onClick={onSettings}
           type="button"
         >
-          <Settings size={13} />
+          <Activity size={13} />
         </button>
         <button type="button" className={`titlebar__btn${optionsOpen ? " active" : ""}`}
           aria-label={optionsOpen ? "オプションを閉じる" : "オプション"} title="オプション"
           aria-pressed={optionsOpen} onClick={onOptions}>
-          <SlidersHorizontal size={13} />
+          <Settings size={13} />
         </button>
         <span className="titlebar__divider" aria-hidden="true" />
         <button

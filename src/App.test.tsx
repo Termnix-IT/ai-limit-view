@@ -221,6 +221,7 @@ describe("App", () => {
     await screen.findByRole("img", { name: /Claude Code 94%/ });
     await user.click(ring());
     await user.click(screen.getByRole("button", { name: "オプション" }));
+    await user.click(screen.getByRole("tab", { name: "アプリ" }));
     expect(await screen.findByText("v0.1.12")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "取得状況" })).toBeNull();
     expect(screen.getByRole("button", { name: "オプションを閉じる" })).toHaveAttribute("aria-pressed", "true");
@@ -450,6 +451,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Kimi Codeを外側に表示" }));
     expect(screen.getByRole("img", { name: /外側 Kimi Code/ }).querySelector('#kimi_cliGrad stop[offset="100%"]')).toHaveAttribute("stop-color", "#ab45ef");
     await user.click(screen.getByRole("button", { name: "オプション" }));
+    await user.click(screen.getByRole("tab", { name: "アプリ" }));
     await user.click(screen.getByRole("button", { name: "初期設定に戻す" }));
     await user.click(screen.getByRole("button", { name: "オプションを閉じる" }));
     expect(screen.queryByRole("button", { name: "Kimi Codeを外側に表示" })).toBeNull();
@@ -462,10 +464,11 @@ describe("App", () => {
     const view = render(<App />);
     await screen.findByRole("img", { name: /Claude Code 94%/ });
     await user.click(screen.getByRole("button", { name: "オプション" }));
+    await user.click(screen.getByRole("tab", { name: "表示" }));
     const slider = screen.getByRole("slider", { name: "ミニマル表示のリングサイズ" });
     expect(slider).toHaveValue("50");
     expect(slider).toHaveAttribute("aria-valuetext", "50%（180px）");
-    const resetSize = screen.getByRole("button", { name: "50%に戻す" });
+    const resetSize = screen.getByRole("button", { name: "リングサイズを50%に戻す" });
     expect(resetSize).toBeDisabled();
     expect(screen.queryByTestId("ring-size-preview")).toBeNull();
     fireEvent.change(slider, { target: { value: "10" } });

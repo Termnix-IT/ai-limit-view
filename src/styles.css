@@ -303,56 +303,65 @@ button.quotaBadge:hover { border-color: var(--danger); background: rgba(150, 48,
 .providerDetails dd { min-width: 0; margin: 0; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .providerDetails dd span { display: block; margin-top: 2px; color: var(--ink-mute); font-size: 10px; }
 .providerDetails__message { margin: 8px 0 0; color: var(--danger); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.appOptions { display: grid; gap: 12px; padding-bottom: 8px; }
-.appOptions__head h1 { font-size: 14px; }
+.appOptions { display: grid; gap: 10px; padding-bottom: 8px; }
 .appOptions p { margin: 5px 0 0; color: var(--ink-mute); font-size: 11px; line-height: 1.6; }
-.appOptions__head p { font-size: 10px; }
-.appOptions h2 { font-size: 12px; }
-.appOptions__identity { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-block: 1px solid var(--line); }
+.appOptions h2 { margin: 0; font-size: 12px; }
+/* Tabs stay reachable while a long panel scrolls; the workspace has 12px top padding. */
+.appOptions__tabbar { position: sticky; top: -12px; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: -12px; padding: 12px 0 8px; border-bottom: 1px solid var(--line); background: var(--bg-deep); }
+.appOptions__tabbar [role="tablist"] { display: flex; gap: 3px; }
+.appOptions__tabbar [role="tab"] { height: 26px; padding: 0 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink-mute); font-size: 11px; font-weight: 700; cursor: pointer; }
+.appOptions__tabbar [role="tab"]:hover { color: var(--ink); }
+.appOptions__tabbar [role="tab"][aria-selected="true"] { color: var(--codex-2); border-color: var(--codex-2); background: var(--codex-soft); }
+.appOptions__tabbar [role="tab"]:focus-visible, .appOptions button:focus-visible { outline: 2px solid var(--codex-2); outline-offset: 2px; }
+.appOptions__save { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-dim); font-size: 10px; white-space: nowrap; }
+.appOptions__save[data-state="error"] { color: var(--danger); }
+.appOptions p.appOptions__error { margin: 0; color: var(--danger); }
+.appOptions p.appOptions__empty { margin: 0; }
+.appOptions__panel { display: grid; }
+.appOptions__identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .appOptions__identity img { flex-shrink: 0; }
-.appOptions__identity span { display: block; margin-top: 6px; color: var(--ink-mute); font-size: 10px; }
-.appOptions__identity strong { display: block; margin-top: 3px; color: var(--codex-2); font-size: 24px; font-variant-numeric: tabular-nums; }
-.appOptions__updates > .refreshButton { margin-top: 12px; }
+.appOptions__identity span { color: var(--codex-2); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .appOptions__result:empty { display: none; }
-.appOptions__result { margin-top: 12px; }
-.appOptions__result p { display: flex; align-items: flex-start; gap: 6px; }
+.appOptions__result { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.appOptions__result p { display: flex; align-items: flex-start; gap: 6px; margin: 0; }
 .appOptions__result svg { flex-shrink: 0; margin-top: 3px; }
 .appOptions__result[data-state="ok"] p { color: var(--success); }
 .appOptions__result[data-state="available"] p { color: var(--codex-2); }
-.appOptions__result[data-state="error"] p, .appOptions p.appOptions__error { color: var(--danger); }
-.appOptions__result span { display: block; margin-top: 6px; color: var(--ink-mute); font-size: 10px; line-height: 1.6; }
-.appOptions__footer { padding-top: 12px; border-top: 1px solid var(--line); }
-.appOptions__footer p { font-size: 10px; }
-.appOptions__spinner { animation: quota-spin 1.6s linear infinite; }
-.displayOptions { padding-bottom: 12px; border-bottom: 1px solid var(--line); }
-.displayOptions__count, .displayOptions__scope, .displayOptions__footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.displayOptions__count { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
-.displayOptions__count > div { display: flex; gap: 3px; }
-.displayOptions__count button { width: 34px; height: 27px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink-mute); }
-.displayOptions__count button[aria-pressed="true"] { color: var(--codex-2); border-color: var(--codex-2); background: var(--codex-soft); }
-.displayOptions__slot { display: grid; grid-template-columns: 24px minmax(0, 1fr) 30px; gap: 6px 8px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.appOptions__result[data-state="error"] p { color: var(--danger); }
+.appOptions__result span { display: block; margin-top: 2px; color: var(--ink-mute); font-size: 10px; line-height: 1.6; }
+.appOptions__install { justify-self: start; margin-top: 8px; }
+.appOptions__app { display: grid; }
+.appOptions__app > p { margin: 6px 0 0; }
+.appOptions .refreshButton { font-size: 10px; white-space: nowrap; }
+.appOptions .refreshButton.danger { color: var(--danger); }
+.appOptions .refreshButton.danger:hover { border-color: var(--danger); }
+.iconButton { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink-mute); cursor: pointer; }
+.iconButton:hover:not(:disabled), .iconButton[aria-expanded="true"] { color: var(--codex-2); border-color: var(--codex-2); }
+.iconButton:disabled { opacity: 0.4; cursor: default; }
+.displayOptions { display: grid; }
+/* One label on the left and its control on the right, separated by the shared rule lines. */
+.displayOptions__row, .appOptions__app .displayOptions__row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
+.displayOptions__row > span { color: var(--ink-mute); }
+.segmented { display: flex; gap: 3px; }
+.segmented button { min-width: 34px; height: 27px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink-mute); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.segmented button[aria-pressed="true"] { color: var(--codex-2); border-color: var(--codex-2); background: var(--codex-soft); }
+.displayOptions__slot { display: grid; grid-template-columns: 20px minmax(0, 1fr) 28px 30px; gap: 6px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .displayOptions__number { color: var(--ink-dim); font-size: 10px; }
+.displayOptions select.displayOptions__wide { grid-column: span 2; }
 .displayOptions select { width: 100%; min-width: 0; height: 29px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: #111d2f; color: var(--ink); font: inherit; font-size: 11px; }
 .displayOptions select:focus-visible, .displayOptions input:focus-visible { outline: 2px solid var(--codex-2); outline-offset: 2px; }
 .displayOptions input[type="color"] { width: 30px; height: 28px; padding: 3px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; }
 .displayOptions p.displayOptions__hint { grid-column: 2 / -1; margin: 0; font-size: 10px; }
 .displayOptions__ringSize { display: grid; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
-.displayOptions__ringSizeHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; }
+.displayOptions__ringSizeHead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; }
 .displayOptions__ringSizeHead output { color: var(--codex-2); font-variant-numeric: tabular-nums; }
 .displayOptions__ringSizeHead output span { margin-left: 6px; color: var(--ink-dim); font-size: 10px; font-weight: 600; }
 .displayOptions__ringSizeControl { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
-.displayOptions__ringSizeControl .refreshButton { font-size: 10px; white-space: nowrap; }
 .displayOptions input[type="range"] { width: 100%; margin: 0; accent-color: var(--codex-2); cursor: pointer; }
-.displayOptions__ringSize p.displayOptions__hint { margin: 0; }
 /* Actual-size minimal ring at 100%, shown while the size slider is adjusted. */
 .ringPreview { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; pointer-events: none; background: rgba(4, 9, 17, 0.72); }
 .ringPreview * { pointer-events: none; }
 .ringPreview__label { position: absolute; bottom: 10px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); background: rgba(9, 15, 27, 0.9); font-size: 10px; font-weight: 700; }
-.displayOptions__scope { padding-top: 12px; font-size: 11px; font-weight: 700; }
-.displayOptions__scope select { width: 142px; }
-.displayOptions__footer { margin-top: 10px; }
-.displayOptions__footer > span { font-size: 10px; color: var(--success); }
-.displayOptions__footer .refreshButton { font-size: 10px; }
 .alert { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font-size: 11px; }
 .alert.danger { border-color: rgba(239, 107, 99, 0.55); color: var(--danger); }
 

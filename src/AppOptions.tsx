@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Check, Download, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert } from "lucide-react";
+import { Check, Download, ExternalLink, Info, LoaderCircle, RefreshCw, RotateCcw, TriangleAlert } from "lucide-react";
+import type { KeyboardEvent } from "react";
 import appIcon from "../src-tauri/icons/32x32.png";
 import { api } from "./api";
 import { formatDateTime } from "./date";
@@ -11,6 +12,15 @@ import { ManaRing } from "./ManaRing";
 import { DEFAULT_RING_SCALE, MAX_RING_SCALE, MIN_RING_SCALE, minimalRingPx, minimalRingZoom } from "./ringSize";
 
 const PREVIEW_HIDE_DELAY_MS = 1500;
+
+type OptionsTab = "rings" | "display" | "app";
+const TABS: { id: OptionsTab; label: string }[] = [
+  { id: "rings", label: "リング" }, { id: "display", label: "表示" }, { id: "app", label: "アプリ" },
+];
+const SCOPES: { id: LimitScope; label: string; title?: string }[] = [
+  { id: "fiveHour", label: "5時間" }, { id: "weekly", label: "週間" },
+  { id: "standard", label: "サービス標準", title: "日次・月間など各サービスの利用枠を表示します。取得できない枠は — です。" },
+];
 const INSTALL_POLL_MS = 2000;
 
 const FULL = { usedPercent: 0, remainingPercent: 100, resetsAt: null };
@@ -54,7 +64,7 @@ function RingSizeOption({ scale, settings, limits, activeTool, scope, onChange }
     <div className="displayOptions__ringSize">
       <div className="displayOptions__ringSizeHead">
         <label htmlFor="ring-size">ミニマル表示のリングサイズ</label>
-        <output htmlFor="ring-size">{scale}%<span>{ringPx}px</span></output>
+        <output htmlFor="ring-size" title="1%で72px、50%で180px、100%で360px">{scale}%<span>{ringPx}px</span></output>
       </div>
       <div className="displayOptions__ringSizeControl">
         <input id="ring-size" type="range" min={MIN_RING_SCALE} max={MAX_RING_SCALE} step={1} value={scale}
@@ -68,11 +78,10 @@ function RingSizeOption({ scale, settings, limits, activeTool, scope, onChange }
           onFocus={showPreview} onKeyDown={showPreview}
           onBlur={() => { pointerHeld.current = false; window.clearTimeout(hideTimer.current); setPreviewing(false); }}
           onChange={(event) => { showPreview(); onChange(Number(event.target.value)); }} />
-        <button type="button" className="refreshButton" disabled={scale === DEFAULT_RING_SCALE}
-          title="リングサイズを従来の大きさ（50%）に戻す"
-          onClick={() => { showPreview(); onChange(DEFAULT_RING_SCALE); }}>50%に戻す</button>
+        <button type="button" className="iconButton" disabled={scale === DEFAULT_RING_SCALE}
+          aria-label="リングサイズを50%に戻す" title="リングサイズを50%（180px）に戻す"
+          onClick={() => { showPreview(); onChange(DEFAULT_RING_SCALE); }}><RotateCcw size={13} aria-hidden="true" /></button>
       </div>
-      <p className="displayOptions__hint">1%で72px、50%で従来の180px、100%で2倍の360pxです。</p>
       {/* A display-only copy of the minimal ring; inert keeps its buttons out of focus and clicks. */}
       {previewing ? <div className="ringPreview" data-testid="ring-size-preview" aria-hidden="true" ref={(element) => { if (element) element.inert = true; }}>
         <ManaRing providers={settings.providers} limits={fullQuotas(settings.providers, limits, scope)} colors={settings.colors}
@@ -168,83 +177,129 @@ export function AppOptions({ settings, limits = {}, activeTool, scope, onSetting
     finally { openRunning.current = false; if (mounted.current) setOpening(false); }
   }
 
+  const [tab, setTab] = useState<OptionsTab>(settings ? "rings" : "app");
+  const [openNote, setOpenNote] = useState<number | null>(null);
+  const tabRefs = useRef<Partial<Record<OptionsTab, HTMLButtonElement | null>>>({});
+  function moveTab(event: KeyboardEvent<HTMLDivElement>) {
+    const current = TABS.findIndex((entry) => entry.id === tab);
+    const index = event.key === "ArrowRight" ? (current + 1) % TABS.length
+      : event.key === "ArrowLeft" ? (current + TABS.length - 1) % TABS.length
+      : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : -1;
+    if (index < 0) return;
+    event.preventDefault();
+    setTab(TABS[index].id);
+    tabRefs.current[TABS[index].id]?.focus();
+  }
+  const editable = settings && onSettingsChange ? { settings, onSettingsChange } : null;
+  const loadingSettings = <p className="appOptions__empty">表示設定を読み込んでいます…</p>;
+
   return (
     <div className="appOptions">
-      <header className="appOptions__head"><h1>オプション</h1><p>{settings ? "リングと表示サービス" : "バージョンとアプリの更新"}</p></header>
-      {settings && onSettingsChange ? <section className="displayOptions" aria-label="表示設定">
-        <div className="displayOptions__count"><h2>リングの本数</h2><div role="group" aria-label="リングの本数">
-          {[1, 2, 3].map((count) => <button type="button" key={count} aria-label={`${count}本`} aria-pressed={settings.providers.length === count}
-            onClick={() => {
-              const providers = settings.providers.slice(0, count);
-              for (const id of PROVIDER_IDS) { if (providers.length >= count) break; if (!providers.includes(id)) providers.push(id); }
-              onSettingsChange({ ...settings, providers });
-            }}>{count}</button>)}
-        </div></div>
-        {settings.providers.map((provider, index) => <div className="displayOptions__slot" key={index}>
-          <span className="displayOptions__number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
-          <label className="srOnly" htmlFor={`ring-provider-${index}`}>リング{index + 1}のサービス</label>
-          <select id={`ring-provider-${index}`} value={provider} onChange={(event) => {
-            const next = event.target.value as ToolKind;
-            const providers = [...settings.providers];
-            const duplicate = providers.indexOf(next);
-            if (duplicate >= 0) providers[duplicate] = provider;
-            providers[index] = next;
-            onSettingsChange({ ...settings, providers });
-          }}>
-            {PROVIDER_IDS.map((id) => <option key={id} value={id}>{PROVIDERS[id].label}{PROVIDERS[id].conditional ? "（条件付き）" : ""}</option>)}
-          </select>
-          <input type="color" aria-label={`${PROVIDERS[provider].label}のリング色`} value={settings.colors[provider] ?? PROVIDERS[provider].color}
-            onChange={(event) => onSettingsChange({ ...settings, colors: { ...settings.colors, [provider]: event.target.value } })} />
-          {provider !== "codex" && provider !== "claude_code" ? <p className="displayOptions__hint">{PROVIDERS[provider].note}</p> : null}
-        </div>)}
-        <RingSizeOption scale={settings.ringScale} settings={settings} limits={limits}
-          activeTool={activeTool && settings.providers.includes(activeTool) ? activeTool : settings.providers[0]}
-          scope={scope ?? settings.initialScope} onChange={(ringScale) => onSettingsChange({ ...settings, ringScale })} />
-        <div className="displayOptions__scope"><label htmlFor="initial-scope">初期表示枠</label>
-          <select id="initial-scope" value={settings.initialScope} onChange={(event) => onSettingsChange({ ...settings, initialScope: event.target.value as LimitScope })}>
-            <option value="fiveHour">5時間</option><option value="weekly">週間</option><option value="standard">サービス標準</option>
-          </select>
+      <h1 className="srOnly">オプション</h1>
+      <div className="appOptions__tabbar">
+        <div role="tablist" aria-label="オプションの分類" onKeyDown={moveTab}>
+          {TABS.map((entry) => <button key={entry.id} type="button" role="tab" id={`options-tab-${entry.id}`}
+            aria-selected={tab === entry.id} aria-controls="options-panel" tabIndex={tab === entry.id ? 0 : -1}
+            ref={(element) => { tabRefs.current[entry.id] = element; }} onClick={() => setTab(entry.id)}>{entry.label}</button>)}
         </div>
-        <p>サービス標準では、日次・月間など各サービスの利用枠を表示します。取得できない枠は — です。</p>
-        <div className="displayOptions__footer"><span role="status">{saving ? "保存中…" : settingsError ? "設定を保存できません" : "変更は自動保存"}</span>
-          <button type="button" className="refreshButton" onClick={() => onResetSettings ? onResetSettings() : onSettingsChange(structuredClone(DEFAULT_SETTINGS))}>初期設定に戻す</button>
-        </div>
-        {settingsError ? <p className="appOptions__error" role="alert">{settingsError}</p> : null}
-      </section> : null}
-      <section className="appOptions__identity" aria-label="現在のバージョン">
-        <img src={appIcon} width={32} height={32} alt="" />
-        <div><h2>LimitView</h2><span>現在のバージョン</span><strong>{version ? (version === "取得できません" ? version : `v${version}`) : "確認中…"}</strong></div>
-      </section>
-      <section className="appOptions__updates" aria-labelledby="app-updates-heading">
-        <h2 id="app-updates-heading">アプリの更新</h2>
-        <p>GitHub Releases の最新版を確認します。</p>
-        <button type="button" className="refreshButton" aria-label="更新を確認" aria-busy={checking}
-          disabled={checking || installing} onClick={() => void checkUpdate()}>
-          {checking ? <LoaderCircle size={12} className="appOptions__spinner" /> : <RefreshCw size={12} />}
-          {checking ? "確認中…" : "更新を確認"}
-        </button>
-        <div className="appOptions__result" role={error ? "alert" : "status"} data-state={checking ? "loading" : error ? "error" : result?.available ? "available" : "ok"}>
-          {checking ? <p>更新情報を取得しています…</p> : error ? <p><TriangleAlert size={13} />{error}</p> : result ? <>
-            <p>{result.available ? <RefreshCw size={13} /> : <Check size={13} />}
-              {result.available ? `v${result.latestVersion} が公開されています。` : "新しい更新はありません。"}</p>
-            <span>確認 {formatDateTime(result.checkedAt)}</span>
-          </> : null}
-        </div>
-        {result?.available && !checking ? <button type="button" className="refreshButton" aria-busy={installing}
-          disabled={installing} onClick={() => void installUpdate()}>
-          {installing ? <LoaderCircle size={12} className="appOptions__spinner" /> : <Download size={12} />}
-          {installing ? "更新中…" : "更新してアプリを再起動"}
-        </button> : null}
-        {installing ? <p role="status">ダウンロードとインストールが終わると、アプリは自動で再起動します。</p> : null}
-        {installError ? <p className="appOptions__error" role="alert">{installError}</p> : null}
-      </section>
-      <footer className="appOptions__footer">
-        <button type="button" className="refreshButton" disabled={opening} onClick={() => void openReleasePage()}>
-          <ExternalLink size={12} />配布ページを開く
-        </button>
-        <p>アプリ内で更新できない場合は、配布ページからインストーラーを取得してください。</p>
-        {openError ? <p className="appOptions__error" role="alert">{openError}</p> : null}
-      </footer>
+        {settings ? <span className="appOptions__save" role="status" data-state={saving ? "saving" : settingsError ? "error" : "saved"}>
+          {saving ? <LoaderCircle size={11} className="appOptions__spinner" aria-hidden="true" />
+            : settingsError ? <TriangleAlert size={11} aria-hidden="true" /> : <Check size={11} aria-hidden="true" />}
+          {saving ? "保存中…" : settingsError ? "設定エラー" : "自動保存"}
+        </span> : null}
+      </div>
+      {settingsError ? <p className="appOptions__error" role="alert">{settingsError}</p> : null}
+
+      <div role="tabpanel" id="options-panel" aria-labelledby={`options-tab-${tab}`} className="appOptions__panel">
+        {tab === "rings" ? editable ? <section className="displayOptions" aria-label="リングとサービス">
+          <div className="displayOptions__row"><h2>リングの本数</h2><div className="segmented" role="group" aria-label="リングの本数">
+            {[1, 2, 3].map((count) => <button type="button" key={count} aria-label={`${count}本`} aria-pressed={editable.settings.providers.length === count}
+              onClick={() => {
+                const providers = editable.settings.providers.slice(0, count);
+                for (const id of PROVIDER_IDS) { if (providers.length >= count) break; if (!providers.includes(id)) providers.push(id); }
+                editable.onSettingsChange({ ...editable.settings, providers });
+              }}>{count}</button>)}
+          </div></div>
+          {editable.settings.providers.map((provider, index) => {
+            const note = provider !== "codex" && provider !== "claude_code" ? PROVIDERS[provider].note : null;
+            return <div className="displayOptions__slot" key={index}>
+              <span className="displayOptions__number" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
+              <label className="srOnly" htmlFor={`ring-provider-${index}`}>リング{index + 1}のサービス</label>
+              <select id={`ring-provider-${index}`} className={note ? undefined : "displayOptions__wide"} value={provider} onChange={(event) => {
+                const next = event.target.value as ToolKind;
+                const providers = [...editable.settings.providers];
+                const duplicate = providers.indexOf(next);
+                if (duplicate >= 0) providers[duplicate] = provider;
+                providers[index] = next;
+                setOpenNote(null);
+                editable.onSettingsChange({ ...editable.settings, providers });
+              }}>
+                {PROVIDER_IDS.map((id) => <option key={id} value={id}>{PROVIDERS[id].label}{PROVIDERS[id].conditional ? "（条件付き）" : ""}</option>)}
+              </select>
+              {note ? <button type="button" className="iconButton" aria-label={`${PROVIDERS[provider].label}の取得条件`}
+                aria-expanded={openNote === index} aria-controls={`ring-note-${index}`} title={note}
+                onClick={() => setOpenNote((current) => current === index ? null : index)}><Info size={13} aria-hidden="true" /></button>
+                : null}
+              <input type="color" aria-label={`${PROVIDERS[provider].label}のリング色`}
+                value={editable.settings.colors[provider] ?? PROVIDERS[provider].color}
+                onChange={(event) => editable.onSettingsChange({ ...editable.settings,
+                  colors: { ...editable.settings.colors, [provider]: event.target.value } })} />
+              {note && openNote === index ? <p className="displayOptions__hint" id={`ring-note-${index}`}>{note}</p> : null}
+            </div>;
+          })}
+        </section> : loadingSettings : null}
+
+        {tab === "display" ? editable ? <section className="displayOptions" aria-label="表示">
+          <div className="displayOptions__row"><h2 id="initial-scope-label">起動時の表示枠</h2>
+            <div className="segmented" role="group" aria-labelledby="initial-scope-label">
+              {SCOPES.map((entry) => <button type="button" key={entry.id} aria-pressed={editable.settings.initialScope === entry.id}
+                title={entry.title} onClick={() => editable.onSettingsChange({ ...editable.settings, initialScope: entry.id })}>{entry.label}</button>)}
+            </div>
+          </div>
+          <RingSizeOption scale={editable.settings.ringScale} settings={editable.settings} limits={limits}
+            activeTool={activeTool && editable.settings.providers.includes(activeTool) ? activeTool : editable.settings.providers[0]}
+            scope={scope ?? editable.settings.initialScope}
+            onChange={(ringScale) => editable.onSettingsChange({ ...editable.settings, ringScale })} />
+        </section> : loadingSettings : null}
+
+        {tab === "app" ? <section className="appOptions__app" aria-label="アプリ">
+          <div className="displayOptions__row">
+            <div className="appOptions__identity"><img src={appIcon} width={16} height={16} alt="" /><h2>LimitView</h2>
+              <span title="現在のバージョン">{version ? (version === "取得できません" ? version : `v${version}`) : "確認中…"}</span></div>
+            <button type="button" className="refreshButton" aria-label="更新を確認" aria-busy={checking}
+              disabled={checking || installing} onClick={() => void checkUpdate()}>
+              {checking ? <LoaderCircle size={12} className="appOptions__spinner" /> : <RefreshCw size={12} />}
+              {checking ? "確認中…" : "更新を確認"}
+            </button>
+          </div>
+          <div className="appOptions__result" role={error ? "alert" : "status"} data-state={checking ? "loading" : error ? "error" : result?.available ? "available" : "ok"}>
+            {checking ? <p>更新情報を取得しています…</p> : error ? <p><TriangleAlert size={13} />{error}</p> : result ? <>
+              <p>{result.available ? <RefreshCw size={13} /> : <Check size={13} />}
+                {result.available ? `v${result.latestVersion} が公開されています。` : "新しい更新はありません。"}</p>
+              <span>確認 {formatDateTime(result.checkedAt)}</span>
+            </> : null}
+          </div>
+          {result?.available && !checking ? <button type="button" className="refreshButton appOptions__install" aria-busy={installing}
+            disabled={installing} onClick={() => void installUpdate()}>
+            {installing ? <LoaderCircle size={12} className="appOptions__spinner" /> : <Download size={12} />}
+            {installing ? "更新中…" : "更新してアプリを再起動"}
+          </button> : null}
+          {installing ? <p role="status">ダウンロードとインストールが終わると、アプリは自動で再起動します。</p> : null}
+          {installError ? <p className="appOptions__error" role="alert">{installError}</p> : null}
+          <div className="displayOptions__row">
+            <span>アプリ内で更新できないとき</span>
+            <button type="button" className="refreshButton" disabled={opening} onClick={() => void openReleasePage()}>
+              <ExternalLink size={12} />配布ページを開く
+            </button>
+          </div>
+          {openError ? <p className="appOptions__error" role="alert">{openError}</p> : null}
+          {editable ? <div className="displayOptions__row">
+            <span>リング・色・サイズ・表示枠</span>
+            <button type="button" className="refreshButton danger"
+              onClick={() => onResetSettings ? onResetSettings() : editable.onSettingsChange(structuredClone(DEFAULT_SETTINGS))}>初期設定に戻す</button>
+          </div> : null}
+        </section> : null}
+      </div>
     </div>
   );
 }
