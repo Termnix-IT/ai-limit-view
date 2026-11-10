@@ -6,6 +6,8 @@ import { AppOptions } from "./AppOptions";
 import { ManaRing } from "./ManaRing";
 import { Titlebar } from "./Titlebar";
 import { ToolChipRail } from "./ToolChipRail";
+import { showContextMenu } from "./contextMenu";
+import type { ContextMenuActions, ContextMenuState } from "./contextMenu";
 import { limitTooltip } from "./limits";
 import { applyQuotaResult, hasCachedQuota, refreshDelay, withoutExpiredQuota } from "./quotaRefresh";
 import { DEFAULT_SETTINGS, PROVIDER_IDS, normalizeSettings, selectedWindow } from "./providers";
@@ -35,6 +37,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
   const [minimal, setMinimal] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const [panel, setPanel] = useState<"limits" | "options" | null>(null);
   const [activeRingTool, setActiveRingTool] = useState<ToolKind>("claude_code");
   const [scope, setScope] = useState<LimitScope>("fiveHour");
@@ -109,8 +112,8 @@ export function App() {
   // pin is undone, so the window keeps its previous size and never stays half-switched.
   // One switch runs at a time; a second request while one is pending is ignored.
   const switchingMode = useRef(false);
-  const switchMode = useCallback(async (toMinimal: boolean) => {
-    if (switchingMode.current) return;
+  const switchMode = useCallback(async (toMinimal: boolean): Promise<boolean> => {
+    if (switchingMode.current) return false;
     switchingMode.current = true;
     const win = getCurrentWindow();
     let pinChanged = false;
@@ -121,10 +124,12 @@ export function App() {
       const [width, height] = toMinimal ? [minimalPx, minimalPx] : NORMAL_SIZE;
       await win.setSize(new LogicalSize(width, height));
       if (toMinimal) setPanel(null);
-      setMinimal(toMinimal); setError(null);
+      setMinimal(toMinimal); setPinned(toMinimal); setError(null);
+      return true;
     } catch (err) {
       if (pinChanged) await bestEffort(() => win.setAlwaysOnTop(!toMinimal));
       setError(String(err));
+      return false;
     } finally {
       switchingMode.current = false;
     }
@@ -142,6 +147,42 @@ export function App() {
   function toggleScope() {
     setScope((current) => current === "fiveHour" ? "weekly" : current === "weekly" && hasOtherPeriods ? "standard" : "fiveHour");
   }
+
+  async function togglePinned() {
+    try { await getCurrentWindow().setAlwaysOnTop(!pinned); setPinned(!pinned); }
+    catch (err) { setError(String(err)); }
+  }
+
+  async function openPanel(next: "limits" | "options") {
+    if (minimal && !(await switchMode(false))) return;
+    setPanel(next);
+  }
+
+  // The native menu replaces the WebView's default one (back, reload, inspect) everywhere
+  // except editable fields, which keep their cut/copy/paste menu. The listener is attached
+  // once and reads the latest render through a ref.
+  const contextMenu = useRef<{ state: ContextMenuState; actions: ContextMenuActions }>();
+  contextMenu.current = {
+    state: { minimal, pinned, canReload: settingsLoaded && !refreshing, scope,
+      scopes: hasOtherPeriods || scope === "standard" ? ["fiveHour", "weekly", "standard"] : ["fiveHour", "weekly"],
+      providers: settings.providers, activeTool: activeRingTool },
+    actions: {
+      toggleMinimal: () => void switchMode(!minimal), togglePinned: () => void togglePinned(),
+      reload: () => refreshLiveLimits(true), selectScope: setScope, selectTool: setActiveRingTool,
+      openLimits: () => void openPanel("limits"), openOptions: () => void openPanel("options"),
+      minimize: () => void getCurrentWindow().minimize(), close: () => void getCurrentWindow().close(),
+    },
+  };
+  useEffect(() => {
+    const handleContextMenu = (event: MouseEvent) => {
+      if ((event.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable='true']")) return;
+      event.preventDefault();
+      const current = contextMenu.current;
+      if (current) void showContextMenu(current.state, current.actions).catch((err) => setError(String(err)));
+    };
+    document.addEventListener("contextmenu", handleContextMenu);
+    return () => document.removeEventListener("contextmenu", handleContextMenu);
+  }, []);
   return (
     <main className={`appShell${minimal ? " appShell--minimal" : ""}`}>
       {minimal ? null : <Titlebar syncedAt={syncedAt} refreshing={refreshing || !settingsLoaded} onReload={() => refreshLiveLimits(true)}
